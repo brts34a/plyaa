@@ -1,0 +1,6 @@
+platform :ios, '15.0'
+
+target 'PlayyIPTV' do
+  use_frameworks!
+  # Tüm ağır pod kütüphaneleri kaldırıldı
+end

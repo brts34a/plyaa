@@ -1,0 +1,6 @@
+{
+  "name": "Dion IPTV",
+  "description": "Premium, high-performance iOS Dion style IPTV player supporting M3U and Xtream Codes with advanced favorites management in a glorious glassy design.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

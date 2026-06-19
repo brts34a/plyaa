@@ -1,0 +1,116 @@
+24:     func encode(to encoder: Encoder) throws {
+25:         var container = encoder.singleValueContainer()
+32:     var stringValue: String {
+39:     var intValue: Int {
+49:     var id: UUID = UUID()
+50:     var name: String
+51:     var mode: Int // 0 = M3U, 1 = Xtream
+52:     var m3uUrl: String = ""
+53:     var xtreamHost: String = ""
+54:     var xtreamUser: String = ""
+55:     var xtreamPass: String = ""
+56:     var expDate: String?
+57:     var maxConnections: String?
+58:     var activeConnections: String?
+59:     var status: String?
+63:     var id = UUID()
+68:     var contentType: String = "live" // "live", "movie", "series"
+70:     func hash(into hasher: inout Hasher) {
+93:     func encode(to encoder: Encoder) throws {
+94:         var container = encoder.singleValueContainer()
+108:     var id: String { category_id?.stringValue ?? UUID().uuidString }
+146:         var currentUrl: String = ""
+149:     func makeCoordinator() -> Coordinator {
+153:     func makeUIView(context: Context) -> IOSVideoPlayerView {
+166:     func updateUIView(_ uiView: IOSVideoPlayerView, context: Context) {
+251:     var body: some View {
+314:     var mainTabContent: some View {
+335:     var globalPortraitPlayerView: some View {
+378:     var liveTVTabContent: some View {
+388:     var liveTVHomeView: some View {
+487:     func liveCategoryDetailView(category: String) -> some View {
+556:     func epgTimelineGrid(category: String) -> some View {
+601:     func epgProgramBox(title: String, time: String, width: CGFloat, active: Bool, onPress: @escaping () -> Void) -> some View {
+617:     var libraryTabContent: some View {
+627:     var libraryHomeView: some View {
+716:     func libraryCategoryDetailView(category: String) -> some View {
+799:     var homeTabContent: some View {
+891:     func homeCategoryRow(title: String, type: String) -> some View {
+924:     var searchTabContent: some View {
+983:     var floatingTabBar: some View {
+1012:     func tabItem(title: String, icon: String, tab: AppTab) -> some View {
+1039:         var landscapePlayerView: some View {
+1137:     private func resetTimer() {
+1147:     var headerBarSection: some View {
+1215:     var welcomeOnboardingArea: some View {
+1264:     var typeTabsView: some View {
+1277:     var searchBarView: some View {
+1299:     var filterButtonsView: some View {
+1356:     var statesAndListView: some View {
+1368:     func errorView(error: String) -> some View {
+1386:     func loadingView() -> some View {
+1399:     func emptyView() -> some View {
+1414:     func channelsListView() -> some View {
+1433:     var listsFilterAndItemsSection: some View {
+1442:     func placeholderIcon(for contentType: String) -> some View {
+1449:     func typeTabButton(title: String, icon: String, tag: String) -> some View {
+1470:     var placeholderText: String {
+1479:     var categories: [String] {
+1485:     var filteredChannels: [Channel] {
+1486:         var baseList = channels
+1514:     var liveCount: Int { channels.filter { $0.contentType == "live" }.count }
+1515:     var movieCount: Int { channels.filter { $0.contentType == "movie" }.count }
+1516:     var seriesCount: Int { channels.filter { $0.contentType == "series" }.count }
+1519:     func getM3uFilePath() -> URL {
+1524:     func getXtreamFilePath() -> URL {
+1530:     func configureAudioSession() {
+1540:     func loadFavourites() {
+1546:     func toggleFavourite(_ url: String) {
+1556:     func logoutAccount() {
+1575:     func extractXtreamCredentials(from m3uUrlString: String) -> (host: String, user: String, pass: String)? {
+1580:         var username: String? = nil
+1581:         var password: String? = nil
+1604:         var host = ""
+1621:     func fetchServerInfo(host: String, user: String, pass: String) {
+1622:         var cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+1632:         var request = URLRequest(url: apiUrl)
+1674:     private func cycleAspect() {
+1684:     private var aspectTitle: String {
+1693:     private var aspectIcon: String {
+1703:     func saveAccounts() {
+1709:     func loadAccounts() {
+1731:     func switchAccount(to account: IPTVAccount) {
+1756:     func loadSavedData() {
+1827:     func openSettings() {
+1837:     func fetchM3uData(_ urlString: String) {
+1848:         var request = URLRequest(url: url)
+1878:     func parseM3UContent(_ text: String) {
+1883:             var loaded: [Channel] = []
+1885:             var currentName = ""
+1886:             var currentGroup = "Genel"
+1887:             var currentLogo = ""
+1950:     func fetchM3uDataInSheet(_ urlString: String) {
+1961:         var request = URLRequest(url: url)
+2017:     func fetchXtreamDataInSheet(host: String, user: String, pass: String) {
+2018:         var cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+2042:         var fetchedCategories: [String: String] = [:]
+2043:         var fetchedChannels: [Channel] = []
+2044:         var internalError: String? = nil
+2201:     func fetchXtreamData(host: String, user: String, pass: String) {
+2206:     var accountsDrawerSheet: some View {
+2237:     var providersMainList: some View {
+2346:     var settingsView: some View {
+2351:     var addM3UView: some View {
+2465:     var addXtreamView: some View {
+2542:     var accountDetailView: some View {
+2553:     var categorySelectionSheet: some View {
+2662:     var body: some View {
+2678:     func stroke<S: ShapeStyle>(_ content: S, righteousness width: CGFloat) -> some View {
+2690:     var body: some View {
+2820:     func placeholderIcon() -> some View {
+2828:     var strokeContent: S
+2829:     var width: CGFloat
+2831:     func body(content: Content) -> some View {
+2843:         var int: UInt64 = 0
+2850:     func makeUIView(context: Context) -> MPVolumeView {
+2859:     func updateUIView(_ uiView: MPVolumeView, context: Context) {}

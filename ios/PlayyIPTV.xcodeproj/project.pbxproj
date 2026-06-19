@@ -1,0 +1,302 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 54;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		9F3E9F8A2A8F95F200CBEBF4 /* PlayyIPTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F3E9F892A8F95F200CBEBF4 /* PlayyIPTVApp.swift */; };
+		9F3E9F8C2A8F95FD00CBEBF4 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F3E9F8B2A8F95FD00CBEBF4 /* ContentView.swift */; };
+		9F3E9F902A8F961F00CBEBF4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9F3E9F8F2A8F961F00CBEBF4 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		9F3E9F862A8F95CE00CBEBF4 /* PlayyIPTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PlayyIPTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9F3E9F892A8F95F200CBEBF4 /* PlayyIPTVApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayyIPTVApp.swift; sourceTree = "<group>"; };
+		9F3E9F8B2A8F95FD00CBEBF4 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		9F3E9F8D2A8F961200CBEBF4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		9F3E9F8F2A8F961F00CBEBF4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		9F3E9F832A8F95CE00CBEBF4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		9F3E9F7D2A8F95CE00CBEBF4 = {
+			isa = PBXGroup;
+			children = (
+				9F3E9F882A8F95CE00CBEBF4 /* PlayyIPTV */,
+				9F3E9F872A8F95CE00CBEBF4 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		9F3E9F872A8F95CE00CBEBF4 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				9F3E9F862A8F95CE00CBEBF4 /* PlayyIPTV.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		9F3E9F882A8F95CE00CBEBF4 /* PlayyIPTV */ = {
+			isa = PBXGroup;
+			children = (
+				9F3E9F892A8F95F200CBEBF4 /* PlayyIPTVApp.swift */,
+				9F3E9F8B2A8F95FD00CBEBF4 /* ContentView.swift */,
+				9F3E9F8D2A8F961200CBEBF4 /* Info.plist */,
+				9F3E9F8F2A8F961F00CBEBF4 /* Assets.xcassets */,
+			);
+			path = PlayyIPTV;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9F3E9F852A8F95CE00CBEBF4 /* PlayyIPTV */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9F3E9F942A8F95CE00CBEBF4 /* Build configuration list for PBXNativeTarget "PlayyIPTV" */;
+			buildPhases = (
+				9F3E9F822A8F95CE00CBEBF4 /* Sources */,
+				9F3E9F832A8F95CE00CBEBF4 /* Frameworks */,
+				9F3E9F842A8F95CE00CBEBF4 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PlayyIPTV;
+			packageProductDependencies = (
+				9F3E9F8F2A8F960E00CBEBF4 /* KSPlayer */,
+			);
+			productName = PlayyIPTV;
+			productReference = 9F3E9F862A8F95CE00CBEBF4 /* PlayyIPTV.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9F3E9F7E2A8F95CE00CBEBF4 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1420;
+				LastUpgradeCheck = 1420;
+				TargetAttributes = {
+					9F3E9F852A8F95CE00CBEBF4 = {
+						CreatedOnToolsVersion = 14.2;
+						DevelopmentTeam = "";
+						LastSwiftMigration = 1420;
+					};
+				};
+			};
+			buildConfigurationList = 9F3E9F812A8F95CE00CBEBF4 /* Build configuration list for PBXProject "PlayyIPTV" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 9F3E9F7D2A8F95CE00CBEBF4;
+			productRefGroup = 9F3E9F872A8F95CE00CBEBF4 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				9F3E9F852A8F95CE00CBEBF4 /* PlayyIPTV */,
+			);
+			packageReferences = (
+				9F3E9F8E2A8F960E00CBEBF4 /* XCRemoteSwiftPackageReference "KSPlayer" */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		9F3E9F842A8F95CE00CBEBF4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9F3E9F902A8F961F00CBEBF4 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		9F3E9F822A8F95CE00CBEBF4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9F3E9F8A2A8F95F200CBEBF4 /* PlayyIPTVApp.swift in Sources */,
+				9F3E9F8C2A8F95FD00CBEBF4 /* ContentView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		9F3E9F8E2A8F960E00CBEBF4 /* XCRemoteSwiftPackageReference "KSPlayer" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/kingslay/KSPlayer.git";
+			requirement = {
+				kind = branch;
+				branch = main;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		9F3E9F8F2A8F960E00CBEBF4 /* KSPlayer */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9F3E9F8E2A8F960E00CBEBF4 /* XCRemoteSwiftPackageReference "KSPlayer" */;
+			productName = KSPlayer;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+/* Begin XCBuildConfiguration section */
+		9F3E9F912A8F95CE00CBEBF4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOMATIC = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		9F3E9F922A8F95CE00CBEBF4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				COPY_PHASE_STRIP = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOMATIC = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		9F3E9F952A8F95CE00CBEBF4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PlayyIPTV/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.aistudio.playyiptv.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		9F3E9F962A8F95CE00CBEBF4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PlayyIPTV/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.aistudio.playyiptv.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		9F3E9F812A8F95CE00CBEBF4 /* Build configuration list for PBXProject "PlayyIPTV" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9F3E9F912A8F95CE00CBEBF4 /* Debug */,
+				9F3E9F922A8F95CE00CBEBF4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9F3E9F942A8F95CE00CBEBF4 /* Build configuration list for PBXNativeTarget "PlayyIPTV" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9F3E9F952A8F95CE00CBEBF4 /* Debug */,
+				9F3E9F962A8F95CE00CBEBF4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 9F3E9F7E2A8F95CE00CBEBF4 /* Project object */;
+}
