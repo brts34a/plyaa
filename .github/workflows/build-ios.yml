@@ -1,0 +1,54 @@
+name: Build iOS IPA (KSPlayer Ultra-Fast)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Cache Build Data
+        uses: actions/cache@v4
+        with:
+          path: |
+            build
+            ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-xcode-v1-${{ hashFiles('**/project.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-v1-
+
+      - name: Set up Xcode Version
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Compile and Build App (Ultra-Fast)
+        run: |
+          xcodebuild -project ios/PlayyIPTV.xcodeproj \
+                     -scheme PlayyIPTV \
+                     -configuration Release \
+                     -sdk iphoneos \
+                     -derivedDataPath build \
+                     -parallelizeTargets \
+                     COMPILER_INDEX_STORE_ENABLE=NO \
+                     CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGN_IDENTITY="" \
+                     PROVISIONING_PROFILE_SPECIFIER="" \
+                     build
+
+      - name: Package Real Unsigned Physical App IPA
+        run: |
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/PlayyIPTV.app Payload/
+          zip -r PlayyIPTV_Unsigned.ipa Payload
+
+      - name: Upload Finished IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlayyIPTV-KSPlayer-iOS-IPA
+          path: PlayyIPTV_Unsigned.ipa
+          retention-days: 5
