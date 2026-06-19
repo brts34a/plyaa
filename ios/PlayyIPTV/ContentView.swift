@@ -1382,7 +1382,7 @@ struct ContentView: View {
                                             resetTimer()
                                         }) {
                                             VStack(spacing: 4) {
-                                                if let logo = ch.logo, !logo.isEmpty, let url = URL(string: logo) {
+                                                if !ch.logo.isEmpty, let url = URL(string: ch.logo) {
                                                     AsyncImage(url: url) { image in
                                                         image.resizable().scaledToFit()
                                                     } placeholder: {
