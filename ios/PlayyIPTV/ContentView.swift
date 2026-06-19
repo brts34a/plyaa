@@ -1296,7 +1296,7 @@ struct ContentView: View {
         var landscapePlayerView: some View {
         ZStack {
             if let channel = selectedChannel {
-                NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode)
+                NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo)
                     .ignoresSafeArea()
                     .onTapGesture {
                         withAnimation { showingControls.toggle() }
