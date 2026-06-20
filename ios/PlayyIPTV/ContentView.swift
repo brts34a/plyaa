@@ -2728,6 +2728,7 @@ struct ContentView: View {
         }
         
         isLoading = true
+        showAccountsSheet = false
         loadStep1 = false
         loadStep2 = false
         loadStep3 = false
@@ -2744,6 +2745,7 @@ struct ContentView: View {
             if let err = err {
                 DispatchQueue.main.async {
                     self.isLoading = false
+                    self.showAccountsSheet = true
                     self.sheetError = "Bağlantı Hatası: \(err.localizedDescription)"
                 }
                 return
@@ -2752,6 +2754,7 @@ struct ContentView: View {
             guard let data = data, let text = String(data: data, encoding: .utf8) else {
                 DispatchQueue.main.async {
                     self.isLoading = false
+                    self.showAccountsSheet = true
                     self.sheetError = "M3U listesi boş veya okunamaz formatta."
                 }
                 return
@@ -2812,6 +2815,7 @@ struct ContentView: View {
         }
         
         isLoading = true
+        showAccountsSheet = false
         loadStep1 = true // Connected
         loadStep2 = false
         loadStep3 = false
@@ -2952,6 +2956,7 @@ struct ContentView: View {
                 
                 if fetchedChannels.isEmpty {
                     self.isLoading = false
+                    self.showAccountsSheet = true
                     self.sheetError = internalError ?? "Girilen bilgilerle aktif bir yayın listesine ulaşılamadı. Lütfen sunucu durumunu veya bilgilerinizi kontrol edin."
                 } else {
                     self.loadStep5 = true
@@ -3013,7 +3018,7 @@ struct ContentView: View {
     var providersMainList: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 20) {
-                Text("Sağlayıcılar")
+                Text("Ayarlar")
                     .font(.system(size: 32, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
@@ -3300,6 +3305,7 @@ struct ContentView: View {
             .padding(.top, 16)
             .padding(.bottom, 120) // Provide massive padding to clear bottom overlapping floating tab bar
             .buttonStyle(PlainButtonStyle())
+            }
         }
     }
     
@@ -3350,9 +3356,9 @@ struct ContentView: View {
                                     .font(.system(size: 16))
                                     .foregroundColor(.white.opacity(0.7))
                                     .padding(.leading, 4)
-                                Text("ACTIVE") // Could be parameterized in a real scenario
+                                Text(serverStatus.isEmpty ? "ACTIVE" : serverStatus.uppercased())
                                     .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(serverStatus.lowercased() == "expired" ? .red : .white)
                                     .padding(.leading, 4)
                                 Spacer()
                             }
@@ -3549,6 +3555,7 @@ struct ContentView: View {
             }
         }
     }
+}
     
     func contentStatBox(title: String, count: Int, icon: String) -> some View {
         VStack(spacing: 12) {
