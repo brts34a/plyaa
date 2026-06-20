@@ -145,6 +145,7 @@ class PlayerInfoManager: ObservableObject {
     @Published var resolutionString: String = "Bağlanıyor..."
     @Published var isAudioOnly: Bool = false
     @Published var isOverlayVisible: Bool = true
+    @Published var isPlaying: Bool = true
     weak var player: AVPlayer?
     var timer: Timer?
     var hideTimer: Timer?
@@ -943,17 +944,45 @@ struct ContentView: View {
                 }
                 
                 if libraryFilter == "Öne çıkanlar" {
-                    let featuredMovies = Array(channels.filter { $0.contentType == "movie" }.prefix(10))
+                    let movieGroupList = channels.filter { $0.contentType == "movie" }
+                    var featuredMovies = [Channel]()
+                    var seenF = Set<String>()
+                    for ch in movieGroupList {
+                        if !seenF.contains(ch.name) {
+                            seenF.insert(ch.name)
+                            featuredMovies.append(ch)
+                        }
+                        if featuredMovies.count >= 10 { break }
+                    }
                     if !featuredMovies.isEmpty {
                         libraryHorizontalRankedSection(title: "Öne çıkan filmler", items: featuredMovies)
                     }
                     
-                    let featuredSeries = Array(channels.filter { $0.contentType == "series" }.prefix(10))
+                    let seriesGroupList = channels.filter { $0.contentType == "series" }
+                    var featuredSeries = [Channel]()
+                    var seenS = Set<String>()
+                    for ch in seriesGroupList {
+                        if !seenS.contains(ch.name) {
+                            seenS.insert(ch.name)
+                            featuredSeries.append(ch)
+                        }
+                        if featuredSeries.count >= 10 { break }
+                    }
                     if !featuredSeries.isEmpty {
                         libraryHorizontalRankedSection(title: "Öne çıkan diziler", items: featuredSeries)
                     }
                     
-                    let recentMovies = Array(channels.filter { $0.contentType == "movie" }.suffix(15).reversed())
+                    let allRecentMovies = Array(channels.filter { $0.contentType == "movie" }.reversed())
+                    var recentMovies = [Channel]()
+                    var seenNames = Set<String>()
+                    for ch in allRecentMovies {
+                        if !seenNames.contains(ch.name) {
+                            seenNames.insert(ch.name)
+                            recentMovies.append(ch)
+                        }
+                        if recentMovies.count >= 15 { break }
+                    }
+                    
                     if !recentMovies.isEmpty {
                         libraryHorizontalPortraitSection(title: "Son eklenen filmler", items: recentMovies)
                     }
@@ -1418,32 +1447,40 @@ struct ContentView: View {
     }
     
     var floatingTabBar: some View {
-        HStack(spacing: 0) {
-            tabItem(title: "Ana Sayfa", icon: "house.fill", tab: .home)
-            tabItem(title: "Canlı TV", icon: "antenna.radiowaves.left.and.right", tab: .live)
-            tabItem(title: "Kütüphane", icon: "square.stack.3d.down.right.fill", tab: .library)
-            tabItem(title: "Ara", icon: "magnifyingglass", tab: .search)
-            tabItem(title: "Ayarlar", icon: "gearshape.fill", tab: .settings)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 10)
-        .background(
-            ZStack {
-                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
-                Color.white.opacity(0.05)
+        HStack(spacing: 12) {
+            // Main Pill
+            HStack(spacing: 0) {
+                tabItem(title: "Ana sayfa", icon: "house.fill", tab: .home)
+                tabItem(title: "Canlı TV", icon: "antenna.radiowaves.left.and.right", tab: .live)
+                tabItem(title: "Kütüphane", icon: "square.stack.3d.down.right.fill", tab: .library)
             }
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 35)
-                .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
-        )
-        .cornerRadius(35)
-        .shadow(color: .black.opacity(0.5), radius: 25, x: 0, y: 15)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+            .background(
+                ZStack {
+                    VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+                    Color.white.opacity(0.1)
+                }
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 35)
+                    .stroke(Color.white.opacity(0.2), lineWidth: 0.5)
+            )
+            .cornerRadius(35)
+            .shadow(color: .black.opacity(0.3), radius: 15, x: 0, y: 10)
+            
+            // Search Circle
+            tabItem(title: "Ara", icon: "magnifyingglass", tab: .search, isCircle: true)
+            
+            // Settings Circle Keep? Or maybe Settings is somewhere else.
+            // There's no settings in the screenshot's bottom bar. Maybe put settings in a circle next to search.
+            tabItem(title: "Ayarlar", icon: "gearshape.fill", tab: .settings, isCircle: true)
+        }
         .padding(.horizontal, 20)
         .padding(.bottom, 24)
     }
 
-    func tabItem(title: String, icon: String, tab: AppTab) -> some View {
+    func tabItem(title: String, icon: String, tab: AppTab, isCircle: Bool = false) -> some View {
         Button(action: {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                 if currentTab == tab {
@@ -1455,32 +1492,55 @@ struct ContentView: View {
                 }
             }
         }) {
-            VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 20, weight: currentTab == tab ? .bold : .medium))
-                    .foregroundColor(currentTab == tab ? .white : .white.opacity(0.5))
-                    // Soft blue/purple glow when active
-                    .shadow(color: currentTab == tab ? Color(hex: "007FFF").opacity(0.8) : .clear, radius: 8, x: 0, y: 0)
-                
-                Text(title)
-                    .font(.system(size: 10, weight: currentTab == tab ? .bold : .medium))
-                    .foregroundColor(currentTab == tab ? .white : .white.opacity(0.5))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 8)
-            .background(
-                ZStack {
-                    if currentTab == tab {
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(LinearGradient(colors: [Color.white.opacity(0.2), Color.white.opacity(0.05)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .matchedGeometryEffect(id: "navGlass", in: glassAnimation)
-                            .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.2), lineWidth: 0.5))
-                    }
+            if isCircle {
+                VStack(spacing: 4) {
+                    Image(systemName: icon)
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundColor(currentTab == tab ? .white : .white.opacity(0.8))
                 }
-            )
-            .frame(maxWidth: .infinity)
+                .frame(width: 60, height: 60)
+                .background(
+                    ZStack {
+                        VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+                        Color.white.opacity(0.1)
+                        if currentTab == tab {
+                            Circle()
+                                .fill(Color(hex: "007FFF").opacity(0.3)) // Optional selection effect
+                        }
+                    }
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.2), lineWidth: 0.5)
+                )
+                .clipShape(Circle())
+                .shadow(color: .black.opacity(0.3), radius: 15, x: 0, y: 10)
+            } else {
+                VStack(spacing: 4) {
+                    Image(systemName: icon)
+                        .font(.system(size: 20, weight: currentTab == tab ? .bold : .medium))
+                        .foregroundColor(currentTab == tab ? .white : .white.opacity(0.8))
+                    
+                    Text(title)
+                        .font(.system(size: 11, weight: currentTab == tab ? .bold : .medium))
+                        .foregroundColor(currentTab == tab ? .white : .white.opacity(0.8))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 8)
+                .background(
+                    ZStack {
+                        if currentTab == tab {
+                            RoundedRectangle(cornerRadius: 30)
+                                .fill(LinearGradient(colors: [Color.white.opacity(0.3), Color.white.opacity(0.1)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .matchedGeometryEffect(id: "navGlass", in: glassAnimation)
+                                .overlay(RoundedRectangle(cornerRadius: 30).stroke(Color.white.opacity(0.3), lineWidth: 0.5))
+                        }
+                    }
+                )
+                .frame(maxWidth: .infinity)
+            }
         }
         .buttonStyle(TabButtonStyle())
     }
@@ -1504,122 +1564,194 @@ struct ContentView: View {
                     }
                 
                 if showingControls {
-                    // Top controls
+                    Color.black.opacity(0.4).ignoresSafeArea() // dim background
+                    
                     VStack {
-                        HStack {
+                        // Top Section
+                        HStack(spacing: 16) {
                             Button(action: {
                                 selectedChannel = nil
                             }) {
                                 Image(systemName: "xmark")
-                                    .font(.system(size: 20, weight: .bold))
+                                    .font(.system(size: 16, weight: .bold))
                                     .foregroundColor(.white)
-                                    .frame(width: 50, height: 50)
+                                    .frame(width: 44, height: 44)
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(Circle())
+                            }
+                            
+                            Button(action: { cycleAspect() }) {
+                                Image(systemName: "arrow.up.backward.and.arrow.down.forward")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 44, height: 44)
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(Circle())
+                            }
+                            
+                            Button(action: { }) {
+                                Image(systemName: "pip.enter")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 44, height: 44)
                                     .background(.ultraThinMaterial)
                                     .clipShape(Circle())
                             }
                             
                             Spacer()
                             
-                            Button(action: { cycleAspect() }) {
-                                Image(systemName: "aspectratio")
-                                    .font(.system(size: 20, weight: .bold))
+                            // Top Right: Volume Indicator
+                            HStack(spacing: 8) {
+                                Capsule().fill(.white.opacity(0.3)).frame(width: 60, height: 4)
+                                Image(systemName: "speaker.wave.3.fill")
                                     .foregroundColor(.white)
-                                    .frame(width: 50, height: 50)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(Circle())
+                                    .font(.system(size: 14))
                             }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
                         }
                         .padding(.horizontal, 40)
                         .padding(.top, 20)
                         
                         Spacer()
-                    }
-                    .zIndex(999)
-                    
-                    // Left and Right Next/Prev Channel Buttons
-                    HStack {
-                        Button(action: {
-                            guard let cur = selectedChannel, let idx = channels.firstIndex(where: { $0.url == cur.url }), idx > 0 else { return }
-                            selectedChannel = channels[idx - 1]
-                            resetTimer()
-                        }) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 60, height: 80)
-                                .background(Color.black.opacity(0.4))
-                                .cornerRadius(12)
-                        }
                         
+                        // Center Play/Pause and Next/Prev Channel
+                        HStack(spacing: 40) {
+                            Button(action: {
+                                guard let cur = selectedChannel, let idx = channels.firstIndex(where: { $0.url == cur.url }), idx > 0 else { return }
+                                selectedChannel = channels[idx - 1]
+                                resetTimer()
+                            }) {
+                                    Image(systemName: "backward.end.fill")
+                                        .font(.system(size: 24, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .frame(width: 50, height: 50)
+                                        .opacity(0.8)
+                            }
+                            
+                            Button(action: {
+                                if globalPlayerInfo.isPlaying {
+                                    globalPlayerInfo.player?.pause()
+                                } else {
+                                    globalPlayerInfo.player?.play()
+                                }
+                                globalPlayerInfo.isPlaying.toggle()
+                                resetTimer()
+                            }) {
+                                Image(systemName: globalPlayerInfo.isPlaying ? "pause.fill" : "play.fill")
+                                    .font(.system(size: 40, weight: .black))
+                                    .foregroundColor(.white)
+                                    .frame(width: 80, height: 80)
+                                    .background(Color.white.opacity(0.1))
+                                    .clipShape(Circle())
+                            }
+                            
+                            Button(action: {
+                                guard let cur = selectedChannel, let idx = channels.firstIndex(where: { $0.url == cur.url }), idx < channels.count - 1 else { return }
+                                selectedChannel = channels[idx + 1]
+                                resetTimer()
+                            }) {
+                                    Image(systemName: "forward.end.fill")
+                                        .font(.system(size: 24, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .frame(width: 50, height: 50)
+                                        .opacity(0.8)
+                            }
+                        }
+
                         Spacer()
                         
-                        Button(action: {
-                            guard let cur = selectedChannel, let idx = channels.firstIndex(where: { $0.url == cur.url }), idx < channels.count - 1 else { return }
-                            selectedChannel = channels[idx + 1]
-                            resetTimer()
-                        }) {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 60, height: 80)
-                                .background(Color.black.opacity(0.4))
-                                .cornerRadius(12)
-                        }
-                    }
-                    .padding(.horizontal, 40)
-                    .zIndex(999)
-                    
-                    // Bottom Channel Bar
-                    VStack {
-                        Spacer()
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            ScrollViewReader { proxy in
-                                HStack(spacing: 12) {
-                                    let groupChannels = channels.filter { $0.safeGroup == selectedChannel?.safeGroup && $0.contentType == selectedChannel?.contentType }
-                                    ForEach(Array(groupChannels.enumerated()), id: \.element.url) { index, ch in
-                                        Button(action: {
-                                            selectedChannel = ch
-                                            resetTimer()
-                                        }) {
-                                            VStack(spacing: 4) {
-                                                if !ch.logo.isEmpty, let url = URL(string: ch.logo) {
-                                                    AsyncImage(url: url) { image in
-                                                        image.resizable().scaledToFit()
-                                                    } placeholder: {
-                                                        Color.white.opacity(0.1)
-                                                    }
-                                                    .frame(width: 40, height: 40)
-                                                    .cornerRadius(8)
-                                                } else {
-                                                    ZStack {
-                                                        Color.white.opacity(0.1)
-                                                        Image(systemName: ch.contentType == "movie" ? "film" : (ch.contentType == "series" ? "play.tv" : "tv"))
-                                                            .foregroundColor(.white.opacity(0.5))
-                                                    }
-                                                    .frame(width: 40, height: 40)
-                                                    .cornerRadius(8)
-                                                }
-                                                Text(ch.name)
-                                                    .font(.system(size: 10, weight: .semibold))
-                                                    .foregroundColor(ch.url == selectedChannel?.url ? Color(hex: "6D28D9") : .white)
-                                                    .lineLimit(1)
-                                                    .frame(width: 80)
-                                            }
-                                            .padding(8)
-                                            .background(ch.url == selectedChannel?.url ? Color.white.opacity(0.1) : Color.black.opacity(0.4))
-                                            .cornerRadius(12)
-                                        }
-                                        .id(ch.url)
+                        // Bottom Section
+                        VStack(spacing: 8) {
+                            HStack(alignment: .bottom) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 4) {
+                                        Circle().fill(Color.red).frame(width: 6, height: 6)
+                                        Text("CANLI")
+                                            .font(.system(size: 10, weight: .black))
+                                            .foregroundColor(.red)
+                                    }
+                                    HStack(spacing: 6) {
+                                        Text(channel.name)
+                                            .font(.system(size: 20, weight: .bold))
+                                            .foregroundColor(.white)
+                                        Text("· \(channel.safeGroup)")
+                                            .font(.system(size: 16, weight: .regular))
+                                            .foregroundColor(.white.opacity(0.7))
                                     }
                                 }
-                                .padding(.horizontal, 40)
-                                .onAppear {
-                                    if let url = selectedChannel?.url {
-                                        proxy.scrollTo(url, anchor: .center)
+                                .padding(.bottom, 4)
+                                
+                                Spacer()
+                                
+                                HStack(spacing: 12) {
+                                    Button(action: {
+                                        // Settings toast feedback or action
+                                        resetTimer()
+                                    }) {
+                                        Image(systemName: "gearshape")
+                                            .font(.system(size: 18, weight: .medium))
+                                            .foregroundColor(.white)
+                                            .frame(width: 44, height: 44)
+                                            .background(.ultraThinMaterial)
+                                            .clipShape(Circle())
+                                    }
+                                    Button(action: { cycleAspect(); resetTimer() }) {
+                                        Image(systemName: "tv")
+                                            .font(.system(size: 18, weight: .medium))
+                                            .foregroundColor(.white)
+                                            .frame(width: 44, height: 44)
+                                            .background(.ultraThinMaterial)
+                                            .clipShape(Circle())
+                                    }
+                                    Button(action: {
+                                        toggleFavourite(channel.url)
+                                        resetTimer()
+                                    }) {
+                                        Image(systemName: favourites.contains(channel.url) ? "bookmark.fill" : "bookmark")
+                                            .font(.system(size: 18, weight: .medium))
+                                            .foregroundColor(favourites.contains(channel.url) ? .yellow : .white)
+                                            .frame(width: 44, height: 44)
+                                            .background(.ultraThinMaterial)
+                                            .clipShape(Circle())
+                                    }
+                                    Button(action: {
+                                        // Toggle list visibility logic could go here
+                                        resetTimer()
+                                    }) {
+                                        Image(systemName: "list.bullet")
+                                            .font(.system(size: 18, weight: .medium))
+                                            .foregroundColor(.white)
+                                            .frame(width: 44, height: 44)
+                                            .background(.ultraThinMaterial)
+                                            .clipShape(Circle())
                                     }
                                 }
                             }
+                            
+                            // Progress line
+                            Rectangle()
+                                .fill(Color.white.opacity(0.3))
+                                .frame(height: 3)
+                                .overlay(
+                                    Rectangle().fill(Color.white).frame(width: 200),
+                                    alignment: .leading
+                                )
+                                .cornerRadius(1.5)
+                                
+                            HStack {
+                                Text("Şimdi: Mevcut Yayın")
+                                    .font(.system(size: 12, weight: .regular))
+                                    .foregroundColor(.white.opacity(0.6))
+                                Spacer()
+                                Text("Sonraki: Sıradaki Yayın")
+                                    .font(.system(size: 12, weight: .regular))
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
                         }
+                        .padding(.horizontal, 40)
                         .padding(.bottom, 20)
                     }
                     .zIndex(999)
