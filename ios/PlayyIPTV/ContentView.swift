@@ -3077,7 +3077,7 @@ struct ContentView: View {
                             .padding(.horizontal, 20)
                         
                         VStack(spacing: 0) {
-                            ForEach(accounts.indices, id: \.self) { index in
+                            ForEach(0..<accounts.count, id: \.self) { index in
                                 let acc = accounts[index]
                                 Button(action: {
                                     if activeAccountIdString == acc.id.uuidString {
@@ -3098,7 +3098,7 @@ struct ContentView: View {
                                         Text(acc.name)
                                             .font(.system(size: 16))
                                             .foregroundColor(.white)
-                                            .padding(.left, 8)
+                                            .padding(.leading, 8)
                                         
                                         Spacer()
                                         
@@ -3139,7 +3139,7 @@ struct ContentView: View {
                                     .frame(width: 28, height: 28)
                                     .background(Color.blue)
                                     .cornerRadius(6)
-                                Text("M3U").font(.system(size: 16)).foregroundColor(.white).padding(.left, 8)
+                                Text("M3U").font(.system(size: 16)).foregroundColor(.white).padding(.leading, 8)
                                 Spacer()
                                 Image(systemName: "chevron.right").foregroundColor(.white.opacity(0.4)).font(.system(size: 14, weight: .semibold))
                             }
@@ -3154,7 +3154,7 @@ struct ContentView: View {
                                     .frame(width: 28, height: 28)
                                     .background(Color(hex: "E0218A"))
                                     .cornerRadius(6)
-                                Text("Xtream").font(.system(size: 16)).foregroundColor(.white).padding(.left, 8)
+                                Text("Xtream").font(.system(size: 16)).foregroundColor(.white).padding(.leading, 8)
                                 Spacer()
                                 Image(systemName: "chevron.right").foregroundColor(.white.opacity(0.4)).font(.system(size: 14, weight: .semibold))
                             }
@@ -3394,11 +3394,11 @@ struct ContentView: View {
                                 Text("Durum:")
                                     .font(.system(size: 16))
                                     .foregroundColor(.white.opacity(0.7))
-                                    .padding(.left, 4)
+                                    .padding(.leading, 4)
                                 Text("ACTIVE") // Could be parameterized in a real scenario
                                     .font(.system(size: 16, weight: .bold))
                                     .foregroundColor(.white)
-                                    .padding(.left, 4)
+                                    .padding(.leading, 4)
                                 Spacer()
                             }
                             .padding(.vertical, 12)
@@ -3413,11 +3413,11 @@ struct ContentView: View {
                                 Text("Bağlantılar:")
                                     .font(.system(size: 16))
                                     .foregroundColor(.white.opacity(0.7))
-                                    .padding(.left, 4)
+                                    .padding(.leading, 4)
                                 Text(serverMaxCons.isEmpty ? "0/2" : serverMaxCons)
                                     .font(.system(size: 16, weight: .bold))
                                     .foregroundColor(.white)
-                                    .padding(.left, 4)
+                                    .padding(.leading, 4)
                                 Spacer()
                             }
                             .padding(.vertical, 12)
@@ -3432,11 +3432,11 @@ struct ContentView: View {
                                 Text("Sona eriyor:")
                                     .font(.system(size: 16))
                                     .foregroundColor(.white.opacity(0.7))
-                                    .padding(.left, 4)
+                                    .padding(.leading, 4)
                                 Text(serverExpiry.isEmpty ? "27 Şub 2027" : serverExpiry)
                                     .font(.system(size: 16, weight: .bold))
                                     .foregroundColor(.white)
-                                    .padding(.left, 4)
+                                    .padding(.leading, 4)
                                 Spacer()
                             }
                             .padding(.vertical, 12)
@@ -3457,9 +3457,9 @@ struct ContentView: View {
                             Button(action: {
                                 // Reload
                                 if acc.mode == 0 {
-                                    fetchM3UData(url: acc.m3uUrl)
+                                    fetchM3uDataInSheet(acc.m3uUrl)
                                 } else {
-                                    fetchXtreamData(host: acc.xtreamHost, user: acc.xtreamUser, pass: acc.xtreamPass)
+                                    fetchXtreamDataInSheet(host: acc.xtreamHost, user: acc.xtreamUser, pass: acc.xtreamPass)
                                 }
                             }) {
                                 HStack {
@@ -3469,7 +3469,7 @@ struct ContentView: View {
                                     Text("Yeniden yükle")
                                         .font(.system(size: 16))
                                         .foregroundColor(.white)
-                                        .padding(.left, 4)
+                                        .padding(.leading, 4)
                                     Spacer()
                                 }
                                 .padding(.vertical, 12)
@@ -3486,7 +3486,7 @@ struct ContentView: View {
                                     Text("Detayları düzenle")
                                         .font(.system(size: 16))
                                         .foregroundColor(.white)
-                                        .padding(.left, 4)
+                                        .padding(.leading, 4)
                                     Spacer()
                                     Image(systemName: "chevron.right").foregroundColor(.white.opacity(0.4)).font(.system(size: 14, weight: .semibold))
                                 }
@@ -3504,7 +3504,7 @@ struct ContentView: View {
                                     Text("İçeriği yönet")
                                         .font(.system(size: 16))
                                         .foregroundColor(.white)
-                                        .padding(.left, 4)
+                                        .padding(.leading, 4)
                                     Spacer()
                                     Text("PRO")
                                         .font(.system(size: 10, weight: .bold))
@@ -3528,7 +3528,7 @@ struct ContentView: View {
                                     Text("Meta veriler")
                                         .font(.system(size: 16))
                                         .foregroundColor(.white)
-                                        .padding(.left, 4)
+                                        .padding(.leading, 4)
                                     Spacer()
                                     Text("TMDB önce")
                                         .font(.system(size: 14))
@@ -3549,7 +3549,7 @@ struct ContentView: View {
                                     Text("EPG'yi yönet")
                                         .font(.system(size: 16))
                                         .foregroundColor(.white)
-                                        .padding(.left, 4)
+                                        .padding(.leading, 4)
                                     Spacer()
                                     Image(systemName: "chevron.right").foregroundColor(.white.opacity(0.4)).font(.system(size: 14, weight: .semibold))
                                 }
@@ -3577,7 +3577,7 @@ struct ContentView: View {
                                     Text("Sil")
                                         .font(.system(size: 16))
                                         .foregroundColor(.red)
-                                        .padding(.left, 4)
+                                        .padding(.leading, 4)
                                     Spacer()
                                 }
                                 .padding(.vertical, 12)
