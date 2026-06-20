@@ -66,6 +66,11 @@ struct Channel: Identifiable, Codable, Hashable {
     let url: String
     var contentType: String = "live" // "live", "movie", "series"
     
+    var safeGroup: String {
+        let g = group.trimmingCharacters(in: .whitespacesAndNewlines)
+        return g.isEmpty ? "Diğer" : g
+    }
+    
     func hash(into hasher: inout Hasher) {
         hasher.combine(name)
         hasher.combine(url)
@@ -185,7 +190,13 @@ class PlayerInfoManager: ObservableObject {
                 foundVideo = true
                 let fps = trackItem.currentVideoFrameRate > 0 ? trackItem.currentVideoFrameRate : assetTrack.nominalFrameRate
                 if fps > 0 {
-                    fpsInfo = " \(Int(round(fps)))FPS"
+                    var finalFps = 25
+                    let rounded = Int(round(fps))
+                    if rounded >= 55 { finalFps = 60 }
+                    else if rounded >= 45 { finalFps = 50 }
+                    else if rounded >= 28 { finalFps = 30 }
+                    else { finalFps = 25 } // Default or minimum logical for live streams
+                    fpsInfo = " \(finalFps)FPS"
                     break
                 }
             }
@@ -487,7 +498,7 @@ struct ContentView: View {
                                         .padding(.horizontal, 20)
                                         .padding(.top, 20)
                                         
-                                    Text(channel.group)
+                                    Text(channel.safeGroup)
                                         .font(.system(size: 14))
                                         .foregroundColor(.white.opacity(0.6))
                                         .padding(.horizontal, 20)
@@ -561,6 +572,39 @@ struct ContentView: View {
                 } else {
                      Color(hex: "08090C")
                      Text("Kanal Seçin").foregroundColor(.white.opacity(0.3)).position(x: pGeo.size.width/2, y: pGeo.size.height * 0.5)
+                }
+                
+                // Next / Prev Channel buttons
+                if selectedChannel != nil {
+                    HStack {
+                        Button(action: {
+                            guard let cur = selectedChannel, let idx = channels.firstIndex(where: { $0.url == cur.url }), idx > 0 else { return }
+                            selectedChannel = channels[idx - 1]
+                        }) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 44, height: 60)
+                                .background(Color.black.opacity(0.3))
+                                .cornerRadius(8)
+                        }
+                        
+                        Spacer()
+                        
+                        Button(action: {
+                            guard let cur = selectedChannel, let idx = channels.firstIndex(where: { $0.url == cur.url }), idx < channels.count - 1 else { return }
+                            selectedChannel = channels[idx + 1]
+                        }) {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 44, height: 60)
+                                .background(Color.black.opacity(0.3))
+                                .cornerRadius(8)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .position(x: pGeo.size.width/2, y: pGeo.size.height * 0.5)
                 }
                 
                 // Transparent Blur Buttons overlaid natively
@@ -659,7 +703,7 @@ struct ContentView: View {
                                 Text(channel.name)
                                     .font(.system(size: 14, weight: .medium))
                                     .foregroundColor(.white.opacity(0.8))
-                                Text(channel.group)
+                                Text(channel.safeGroup)
                                     .font(.system(size: 12, weight: .regular))
                                     .foregroundColor(.white.opacity(0.5))
                             }
@@ -681,7 +725,7 @@ struct ContentView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
                 
-                let liveGroups = Array(Set(channels.filter({ $0.contentType == "live" }).map({ $0.group }))).sorted()
+                let liveGroups = Array(Set(channels.filter({ $0.contentType == "live" }).map({ $0.safeGroup }))).sorted()
                 
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                     ForEach(liveGroups, id: \.self) { group in
@@ -721,7 +765,7 @@ struct ContentView: View {
                 Spacer()
                 
                 Menu {
-                    let liveGroups = Array(Set(channels.filter({ $0.contentType == "live" }).map({ $0.group }))).sorted()
+                    let liveGroups = Array(Set(channels.filter({ $0.contentType == "live" }).map({ $0.safeGroup }))).sorted()
                     ForEach(liveGroups, id: \.self) { group in
                         Button(group) {
                             withAnimation { activeLiveCategory = group }
@@ -786,7 +830,7 @@ struct ContentView: View {
     func epgTimelineGrid(category: String) -> some View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: 12) {
-                let filteredLive = channels.filter { $0.contentType == "live" && $0.group == category && (liveSearchQuery.isEmpty || $0.name.localizedCaseInsensitiveContains(liveSearchQuery)) }
+                let filteredLive = channels.filter { $0.contentType == "live" && $0.safeGroup == category && (liveSearchQuery.isEmpty || $0.name.localizedCaseInsensitiveContains(liveSearchQuery)) }
                 ForEach(filteredLive, id: \.id) { channel in
                     HStack(spacing: 12) {
                         // Left Logo
@@ -854,91 +898,232 @@ struct ContentView: View {
         }
     }
     
+    @State private var libraryFilter: String = "Öne çıkanlar" // "Öne çıkanlar", "Filmler", "Diziler"
+    
     var libraryHomeView: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 20) {
-                Text("Kütüphane")
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 60)
-                
-                let libraryItems = channels.filter { $0.contentType != "live" }
-                
-                // Top Numbered Items Section
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 24) {
-                        ForEach(Array(libraryItems.prefix(10).enumerated()), id: \.element.id) { index, channel in
-                            Button(action: {
-                                selectedChannel = channel
-                            }) {
-                                ZStack(alignment: .bottomLeading) {
-                                    ZStack {
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .fill(Color.white.opacity(0.05))
-                                        
-                                        if let url = URL(string: channel.logo) {
-                                            AsyncImage(url: url) { phase in
-                                                if let image = phase.image {
-                                                    image.resizable().aspectRatio(contentMode: .fill).frame(width: 160, height: 240).clipShape(RoundedRectangle(cornerRadius: 16))
-                                                } else {
-                                                    Image(systemName: "film.fill").foregroundColor(.white.opacity(0.2)).font(.system(size: 40))
-                                                }
-                                            }
-                                        }
-                                    }
-                                    .frame(width: 160, height: 240)
-                                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                    )
-                                    
-                                    Text("\(index + 1)")
-                                        .font(.system(size: 100, weight: .black, design: .rounded))
-                                        .foregroundColor(Color.white.opacity(0.85))
-                                        .shadow(color: .black.opacity(0.8), radius: 8, x: 2, y: 2)
-                                        .offset(x: -25, y: 35)
-                                }
-                                .padding(.bottom, 40)
-                                .padding(.leading, index == 0 ? 30 : 10)
-                            }
-                            .buttonStyle(PlainButtonStyle())
+                // Top Header
+                HStack {
+                    Text("Kütüphane")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundColor(.white)
+                    Spacer()
+                    
+                    HStack(spacing: 12) {
+                        Button(action: {}) {
+                            Image(systemName: "line.3.horizontal")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 40, height: 40)
+                                .background(Color.white.opacity(0.1))
+                                .clipShape(Circle())
                         }
-                    }
-                    .padding(.trailing, 20)
-                }
-                
-                Spacer().frame(height: 10)
-                
-                Text("Film & Dizi Kategorileri")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                
-                let vodGroups = Array(Set(channels.filter({ $0.contentType != "live" }).map({ $0.group }))).sorted()
-                
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                    ForEach(vodGroups, id: \.self) { group in
-                        Button(action: {
-                            withAnimation { activeLibraryCategory = group }
-                        }) {
-                            Text(group)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.9))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 16)
-                                .background(Color.white.opacity(0.08))
-                                .cornerRadius(12)
+                        Button(action: {}) {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 40, height: 40)
+                                .background(Color.white.opacity(0.1))
+                                .clipShape(Circle())
                         }
                     }
                 }
                 .padding(.horizontal, 20)
+                .padding(.top, 60)
+                
+                // Pills
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        libraryPill(title: "Öne çıkanlar", icon: "sparkles", selected: libraryFilter == "Öne çıkanlar")
+                        libraryPill(title: "Filmler", icon: "film", selected: libraryFilter == "Filmler")
+                        libraryPill(title: "Diziler", icon: "tv", selected: libraryFilter == "Diziler")
+                    }
+                    .padding(.horizontal, 20)
+                }
+                
+                if libraryFilter == "Öne çıkanlar" {
+                    let featuredMovies = Array(channels.filter { $0.contentType == "movie" }.prefix(10))
+                    if !featuredMovies.isEmpty {
+                        libraryHorizontalRankedSection(title: "Öne çıkan filmler", items: featuredMovies)
+                    }
+                    
+                    let featuredSeries = Array(channels.filter { $0.contentType == "series" }.prefix(10))
+                    if !featuredSeries.isEmpty {
+                        libraryHorizontalRankedSection(title: "Öne çıkan diziler", items: featuredSeries)
+                    }
+                    
+                    let recentMovies = Array(channels.filter { $0.contentType == "movie" }.suffix(15).reversed())
+                    if !recentMovies.isEmpty {
+                        libraryHorizontalPortraitSection(title: "Son eklenen filmler", items: recentMovies)
+                    }
+                } else if libraryFilter == "Filmler" {
+                    let movieGroups = Array(Set(channels.filter({ $0.contentType == "movie" }).map({ $0.safeGroup }))).sorted()
+                    libraryCategoryGrid(groups: movieGroups)
+                } else if libraryFilter == "Diziler" {
+                    let seriesGroups = Array(Set(channels.filter({ $0.contentType == "series" }).map({ $0.safeGroup }))).sorted()
+                    libraryCategoryGrid(groups: seriesGroups)
+                }
                 
                 Spacer().frame(height: 120)
             }
         }
+    }
+    
+    func libraryPill(title: String, icon: String, selected: Bool) -> some View {
+        Button(action: {
+            withAnimation { libraryFilter = title }
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 14))
+                    .foregroundColor(selected ? Color(hex: "007FFF") : .white)
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(selected ? Color(hex: "007FFF") : .white)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(selected ? Color(hex: "007FFF").opacity(0.15) : Color.white.opacity(0.1))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(selected ? Color(hex: "007FFF").opacity(0.5) : Color.white.opacity(0.2), lineWidth: 1)
+            )
+            .cornerRadius(20)
+        }
+    }
+    
+    func libraryCategoryGrid(groups: [String]) -> some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+            ForEach(groups, id: \.self) { group in
+                Button(action: {
+                    withAnimation { activeLibraryCategory = group }
+                }) {
+                    Text(group)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.9))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 16)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(12)
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
+    }
+    
+    func libraryHorizontalRankedSection(title: String, items: [Channel]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.white)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .padding(.horizontal, 20)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 20) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, channel in
+                        Button(action: {
+                            selectedChannel = channel
+                        }) {
+                            ZStack(alignment: .bottomLeading) {
+                                Group {
+                                    if !channel.logo.isEmpty, let url = URL(string: channel.logo) {
+                                        AsyncImage(url: url) { phase in
+                                            if let image = phase.image {
+                                                image.resizable().aspectRatio(contentMode: .fill)
+                                            } else {
+                                                Color.white.opacity(0.1)
+                                            }
+                                        }
+                                    } else {
+                                        Color.white.opacity(0.1)
+                                    }
+                                }
+                                .frame(width: 250, height: 140)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .padding(.leading, 30)
+                                .padding(.bottom, 45)
+                                
+                                HStack(alignment: .bottom, spacing: 12) {
+                                    Text("\(index + 1)")
+                                        .font(.system(size: 70, weight: .heavy))
+                                        .foregroundColor(.white)
+                                        .shadow(color: .black.opacity(0.8), radius: 5, x: 2, y: 2)
+                                    
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(channel.name)
+                                            .font(.system(size: 15, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .lineLimit(1)
+                                        Text(channel.safeGroup)
+                                            .font(.system(size: 12, weight: .regular))
+                                            .foregroundColor(.white.opacity(0.5))
+                                            .lineLimit(1)
+                                    }
+                                    .padding(.bottom, 12)
+                                }
+                            }
+                            .frame(width: 280, height: 185)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .padding(.leading, index == 0 ? 10 : 0)
+                    }
+                }
+                .padding(.horizontal, 10)
+            }
+        }
+        .padding(.top, 10)
+    }
+    
+    func libraryHorizontalPortraitSection(title: String, items: [Channel]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.white)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .padding(.horizontal, 20)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, channel in
+                        Button(action: {
+                            selectedChannel = channel
+                        }) {
+                            Group {
+                                if !channel.logo.isEmpty, let url = URL(string: channel.logo) {
+                                    AsyncImage(url: url) { phase in
+                                        if let image = phase.image {
+                                            image.resizable().aspectRatio(contentMode: .fill)
+                                        } else {
+                                            Color.white.opacity(0.1)
+                                        }
+                                    }
+                                } else {
+                                    Color.white.opacity(0.1)
+                                }
+                            }
+                            .frame(width: 120, height: 180)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .padding(.leading, index == 0 ? 20 : 0)
+                        .padding(.trailing, index == items.count - 1 ? 20 : 0)
+                    }
+                }
+            }
+        }
+        .padding(.top, 10)
     }
     
     @State private var librarySearchQuery: String = ""
@@ -989,7 +1174,7 @@ struct ContentView: View {
             // Content
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 16) {
-                    let filteredItems = channels.filter { $0.contentType != "live" && $0.group == category && (librarySearchQuery.isEmpty || $0.name.localizedCaseInsensitiveContains(librarySearchQuery)) }
+                    let filteredItems = channels.filter { $0.contentType != "live" && $0.safeGroup == category && (librarySearchQuery.isEmpty || $0.name.localizedCaseInsensitiveContains(librarySearchQuery)) }
                     
                     ForEach(filteredItems, id: \.id) { channel in
                         Button(action: { selectedChannel = channel }) {
@@ -1224,6 +1409,14 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
+    struct TabButtonStyle: ButtonStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .scaleEffect(configuration.isPressed ? 0.90 : 1.0)
+                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: configuration.isPressed)
+        }
+    }
+    
     var floatingTabBar: some View {
         HStack(spacing: 0) {
             tabItem(title: "Ana Sayfa", icon: "house.fill", tab: .home)
@@ -1232,57 +1425,64 @@ struct ContentView: View {
             tabItem(title: "Ara", icon: "magnifyingglass", tab: .search)
             tabItem(title: "Ayarlar", icon: "gearshape.fill", tab: .settings)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 16)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
         .background(
             ZStack {
-                VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
-                Color.black.opacity(0.2)
+                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+                Color.white.opacity(0.05)
             }
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 32)
-                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 35)
+                .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
         )
-        .cornerRadius(32)
-        // Only glow on active tab overall indicator, but prompt says "seçilen sekmede neon yeşili glow yaysın" 
-        // We will add the glow to the buttons themselves within tabItem. But here we just add a subtle general shadow
-        .shadow(color: .black.opacity(0.4), radius: 30, x: 0, y: 15)
-        .padding(.horizontal, 24)
+        .cornerRadius(35)
+        .shadow(color: .black.opacity(0.5), radius: 25, x: 0, y: 15)
+        .padding(.horizontal, 20)
         .padding(.bottom, 24)
     }
 
     func tabItem(title: String, icon: String, tab: AppTab) -> some View {
         Button(action: {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { currentTab = tab }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                if currentTab == tab {
+                    // Reset tab state if already active
+                    if tab == .live { activeLiveCategory = nil }
+                    if tab == .library { selectedCategory = "Tümü"; librarySearchQuery = "" }
+                } else {
+                    currentTab = tab
+                }
+            }
         }) {
             VStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 20, weight: currentTab == tab ? .bold : .regular))
-                    .foregroundColor(currentTab == tab ? Color(hex: "6D28D9") : .white.opacity(0.4))
-                    // Neon green glow when active
-                    .shadow(color: currentTab == tab ? Color(hex: "6D28D9").opacity(0.8) : .clear, radius: 10, x: 0, y: 0)
+                    .font(.system(size: 20, weight: currentTab == tab ? .bold : .medium))
+                    .foregroundColor(currentTab == tab ? .white : .white.opacity(0.5))
+                    // Soft blue/purple glow when active
+                    .shadow(color: currentTab == tab ? Color(hex: "007FFF").opacity(0.8) : .clear, radius: 8, x: 0, y: 0)
+                
                 Text(title)
                     .font(.system(size: 10, weight: currentTab == tab ? .bold : .medium))
-                    .foregroundColor(currentTab == tab ? .white : .white.opacity(0.4))
+                    .foregroundColor(currentTab == tab ? .white : .white.opacity(0.5))
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
             }
             .padding(.vertical, 8)
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 8)
             .background(
                 ZStack {
                     if currentTab == tab {
-                        VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialLight))
-                            .opacity(0.25)
-                            .cornerRadius(16)
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(LinearGradient(colors: [Color.white.opacity(0.2), Color.white.opacity(0.05)], startPoint: .topLeading, endPoint: .bottomTrailing))
                             .matchedGeometryEffect(id: "navGlass", in: glassAnimation)
+                            .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.2), lineWidth: 0.5))
                     }
                 }
             )
             .frame(maxWidth: .infinity)
         }
-        .buttonStyle(PlainButtonStyle())
+        .buttonStyle(TabButtonStyle())
     }
     
     @State private var showingControls: Bool = false
@@ -1375,7 +1575,7 @@ struct ContentView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             ScrollViewReader { proxy in
                                 HStack(spacing: 12) {
-                                    let groupChannels = channels.filter { $0.group == selectedChannel?.group && $0.contentType == selectedChannel?.contentType }
+                                    let groupChannels = channels.filter { $0.safeGroup == selectedChannel?.safeGroup && $0.contentType == selectedChannel?.contentType }
                                     ForEach(Array(groupChannels.enumerated()), id: \.element.url) { index, ch in
                                         Button(action: {
                                             selectedChannel = ch
@@ -1833,7 +2033,7 @@ struct ContentView: View {
     // MARK: - Dynamic Filter Categorization
     var categories: [String] {
         let matched = channels.filter { $0.contentType == contentTypeFilter }
-        let groups = Set(matched.map { $0.group })
+        let groups = Set(matched.map { $0.safeGroup })
         return Array(groups).sorted()
     }
     
@@ -1851,14 +2051,14 @@ struct ContentView: View {
         if selectedCategory == "Favoriler" {
             baseList = baseList.filter { favourites.contains($0.url) }
         } else if selectedCategory != "Tümü" {
-            baseList = baseList.filter { $0.group == selectedCategory }
+            baseList = baseList.filter { $0.safeGroup == selectedCategory }
         }
         
         // Search query keywords helper
         if !searchQuery.isEmpty {
             let key = searchQuery.lowercased()
             baseList = baseList.filter {
-                $0.name.lowercased().contains(key) || $0.group.lowercased().contains(key)
+                $0.name.lowercased().contains(key) || $0.safeGroup.lowercased().contains(key)
             }
         }
         
@@ -3243,7 +3443,7 @@ struct ChannelRowView: View {
                                 .frame(width: 6, height: 6)
                         }
                     }
-                    Text(channel.group)
+                    Text(channel.safeGroup)
                         .foregroundColor(isSelected ? Color(hex: "6D28D9") : Color.white.opacity(0.6))
                         .font(.system(size: 11, weight: .semibold))
                         .lineLimit(1)
