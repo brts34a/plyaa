@@ -472,7 +472,7 @@ struct ContentView: View {
     
     var body: some View {
         GeometryReader { geo in
-            let landscape = geo.size.width > geo.size.height
+            let _ = geo.size.width > geo.size.height
             ZStack {
                 Color(hex: "08090C").ignoresSafeArea()
                 
@@ -628,7 +628,7 @@ struct ContentView: View {
                             .foregroundColor(.white)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
-                            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.2), lineWidth: 1))
+                            .sexyGlass(cornerRadius: 16)
                             .frame(height: 32)
                     }
                     .padding(.trailing, 20)
@@ -1444,8 +1444,7 @@ struct ContentView: View {
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.white)
                             .frame(width: 44, height: 44)
-                            .background(VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark)))
-                            .clipShape(Circle())
+                            .sexyGlassCircle()
                     }
                     Button(action: {
                         showAccountsSheet = true
@@ -1454,8 +1453,7 @@ struct ContentView: View {
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.white)
                             .frame(width: 44, height: 44)
-                            .background(VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark)))
-                            .clipShape(Circle())
+                            .sexyGlassCircle()
                     }
                 }
             }
@@ -1589,25 +1587,7 @@ struct ContentView: View {
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 6)
-            .background(
-                ZStack {
-                    VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
-                    Color.white.opacity(0.08)
-                }
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 35)
-                    .stroke(
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color.white.opacity(0.4), Color.white.opacity(0.1)]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 35))
-            .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 15)
+            .sexyGlass(cornerRadius: 35)
             
             // Search Circle
             tabItem(title: "Ara", icon: "magnifyingglass", tab: .search, isCircle: true)
@@ -1649,24 +1629,7 @@ struct ContentView: View {
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundColor(.white)
                     .frame(width: 60, height: 60)
-                    .background(
-                        ZStack {
-                            VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
-                            Color.white.opacity(0.08)
-                        }
-                    )
-                    .overlay(
-                        Circle().stroke(
-                            LinearGradient(
-                                gradient: Gradient(colors: [Color.white.opacity(0.4), Color.white.opacity(0.1)]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                    )
-                    .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 15)
+                    .sexyGlassCircle()
             } else {
                 VStack(spacing: 4) {
                     Image(systemName: icon)
@@ -3031,30 +2994,18 @@ struct ContentView: View {
 
     // MARK: - Premium Dion Accounts Drawer Sheet
     var accountsDrawerSheet: some View {
-        NavigationView {
-            ZStack {
-                Color(hex: "101116").ignoresSafeArea()
-                
-                if providerSheetState == 0 {
-                    providersMainList
-                } else if providerSheetState == 1 {
-                    addM3UView
-                } else if providerSheetState == 2 {
-                    addXtreamView
-                } else if providerSheetState == 3 {
-                    accountDetailView
-                }
+        ZStack {
+            Color(hex: "101116").ignoresSafeArea()
+            
+            if providerSheetState == 0 {
+                providersMainList
+            } else if providerSheetState == 1 {
+                addM3UView
+            } else if providerSheetState == 2 {
+                addXtreamView
+            } else if providerSheetState == 3 {
+                accountDetailView
             }
-            .navigationBarItems(trailing: Button(action: {
-                if providerSheetState != 0 {
-                    providerSheetState = 0
-                }
-            }) {
-                Text(providerSheetState == 0 ? "" : "Geri")
-                    .foregroundColor(.white)
-                    .font(.system(size: 16, weight: .bold))
-            })
-            .navigationBarTitleDisplayMode(.inline)
         }
     }
     
@@ -3179,17 +3130,28 @@ struct ContentView: View {
 
     // MARK: - Provider Subviews
     var addM3UView: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                Picker("Giriş Modu", selection: $iptvMode) {
-                    Text("M3U Playlist URL").tag(0)
-                    Text("Xtream Codes API").tag(1)
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Button(action: {
+                    providerSheetState = 0
+                }) {
+                    Text("Geri")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .sexyGlass(cornerRadius: 16)
                 }
-                .pickerStyle(SegmentedPickerStyle())
-                .padding(.top, 16)
-                .padding(.horizontal, 20)
-                
-                if iptvMode == 0 {
+                Spacer()
+            }
+            .frame(height: 44)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 10)
+
+            ScrollView {
+                VStack(spacing: 24) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("M3U OYNATMA LİSTESİ BAĞLANTISI")
                             .font(.system(size: 11, weight: .bold))
@@ -3208,94 +3170,64 @@ struct ContentView: View {
                             .foregroundColor(.white.opacity(0.4))
                     }
                     .padding(.horizontal, 20)
-                } else {
-                    VStack(spacing: 16) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("SUNUCU ADRESİ (HOST URL)")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(Color(hex: "6D28D9"))
-                            
-                            TextField("http://sunucum.xyz:8080", text: $tempXtreamHost)
-                                .padding()
-                                .background(Color.white.opacity(0.06))
-                                .cornerRadius(12)
-                                .foregroundColor(.white)
-                                .autocorrectionDisabled()
-                                .keyboardType(.URL)
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("KULLANICI ADI")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(Color(hex: "6D28D9"))
-                            
-                            TextField("örn: mtsc_2391", text: $tempXtreamUser)
-                                .padding()
-                                .background(Color.white.opacity(0.06))
-                                .cornerRadius(12)
-                                .foregroundColor(.white)
-                                .autocorrectionDisabled()
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("ŞİFRE")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(Color(hex: "6D28D9"))
-                            
-                            SecureField("Şifrenizi girin", text: $tempXtreamPass)
-                                .padding()
-                                .background(Color.white.opacity(0.06))
-                                .cornerRadius(12)
-                                .foregroundColor(.white)
-                                .autocorrectionDisabled()
-                        }
+                    .padding(.top, 16)
+                    
+                    if let sErr = sheetError, !sErr.isEmpty {
+                        Text(sErr)
+                            .font(.system(size: 11))
+                            .foregroundColor(.red)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
                     }
-                    .padding(.horizontal, 20)
-                }
-                
-                if let sErr = sheetError, !sErr.isEmpty {
-                    Text(sErr)
-                        .font(.system(size: 11))
-                        .foregroundColor(.red)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
-                }
-                
-                Button(action: {
-                    sheetError = nil
-                    if iptvMode == 0 {
+                    
+                    Button(action: {
+                        sheetError = nil
                         if tempM3uUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             sheetError = "Lütfen geçerli bir M3U playlist URL adresi girin."
                         } else {
                             fetchM3uDataInSheet(tempM3uUrl)
                         }
-                    } else {
-                        if tempXtreamHost.isEmpty || tempXtreamUser.isEmpty || tempXtreamPass.isEmpty {
-                            sheetError = "Lütfen tüm bağlantı bilgilerini eksiksiz doldurun."
-                        } else {
-                            fetchXtreamDataInSheet(host: tempXtreamHost, user: tempXtreamUser, pass: tempXtreamPass)
-                        }
+                    }) {
+                        Text(sheetIsLoading ? "Bağlanıyor..." : "PLAYLIST'İ YÜKLE")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(sheetIsLoading ? Color.gray : Color(hex: "6D28D9"))
+                            .cornerRadius(14)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 120)
                     }
-                }) {
-                    Text(sheetIsLoading ? "Bağlanıyor..." : (iptvMode == 0 ? "PLAYLIST'İ YÜKLE" : "HESABA BAĞLAN"))
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.black)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(sheetIsLoading ? Color.gray : Color(hex: "6D28D9"))
-                        .cornerRadius(14)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 120) // Provide massive padding to clear bottom overlapping floating tab bar
+                    .disabled(sheetIsLoading)
+                    .buttonStyle(PlainButtonStyle())
                 }
-                .disabled(sheetIsLoading)
-                .buttonStyle(PlainButtonStyle())
             }
         }
     }
     
     var addXtreamView: some View {
-        ScrollView {
-            VStack(spacing: 16) {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Button(action: {
+                    providerSheetState = 0
+                }) {
+                    Text("Geri")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .sexyGlass(cornerRadius: 16)
+                }
+                Spacer()
+            }
+            .frame(height: 44)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 10)
+
+            ScrollView {
+                VStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("SUNUCU ADRESİ (HOST URL)")
                         .font(.system(size: 11, weight: .bold))
@@ -3372,15 +3304,38 @@ struct ContentView: View {
     }
     
     var accountDetailView: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 20) {
-                if let acc = selectedDetailAccount {
-                    Text("IPTV")
-                        .font(.system(size: 16, weight: .bold))
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Spacer() // For aesthetic balance, if we needed back button it could go left
+            }
+            .frame(height: 44)
+            .overlay(
+                Text("IPTV")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.white)
+            )
+            .overlay(
+                Button(action: {
+                    showAccountsSheet = false
+                }) {
+                    Text("Bitti")
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white)
-                        .padding(.top, 10)
-                    
-                    VStack(alignment: .leading, spacing: 10) {
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .sexyGlass(cornerRadius: 16)
+                }
+                , alignment: .trailing
+            )
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 10)
+
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 20) {
+                    if let acc = selectedDetailAccount {
+                        VStack(alignment: .leading, spacing: 10) {
                         Text("Sunucu bilgisi")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.white.opacity(0.6))
@@ -3907,6 +3862,52 @@ struct VisualEffectView: UIViewRepresentable {
     var effect: UIVisualEffect?
     func makeUIView(context: UIViewRepresentableContext<Self>) -> UIVisualEffectView { UIVisualEffectView() }
     func updateUIView(_ uiView: UIVisualEffectView, context: UIViewRepresentableContext<Self>) { uiView.effect = effect }
+}
+
+extension View {
+    func sexyGlass(cornerRadius: CGFloat = 20) -> some View {
+        self.background(
+            ZStack {
+                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+                Color.white.opacity(0.08)
+            }
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .stroke(
+                    LinearGradient(
+                        gradient: Gradient(colors: [Color.white.opacity(0.4), Color.white.opacity(0.1)]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 15)
+    }
+    
+    func sexyGlassCircle() -> some View {
+        self.background(
+            ZStack {
+                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+                Color.white.opacity(0.08)
+            }
+        )
+        .overlay(
+            Circle()
+                .stroke(
+                    LinearGradient(
+                        gradient: Gradient(colors: [Color.white.opacity(0.4), Color.white.opacity(0.1)]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
+        .clipShape(Circle())
+        .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 15)
+    }
 }
 
 // High-fidelity custom safe Color Hex string initialization
