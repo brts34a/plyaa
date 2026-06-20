@@ -1458,29 +1458,23 @@ struct ContentView: View {
             HStack(spacing: 0) {
                 tabItem(title: "Ana sayfa", icon: "house.fill", tab: .home)
                 tabItem(title: "Canlı TV", icon: "antenna.radiowaves.left.and.right", tab: .live)
-                tabItem(title: "Kütüphane", icon: "square.stack.3d.down.right.fill", tab: .library)
+                // Using stack icon based on the screenshot
+                tabItem(title: "Kütüphane", icon: "square.stack.3d.up.fill", tab: .library)
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 6)
             .background(
-                ZStack {
-                    VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
-                    Color.white.opacity(0.1)
-                }
+                VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 35)
-                    .stroke(Color.white.opacity(0.2), lineWidth: 0.5)
+                    .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
             )
-            .cornerRadius(35)
+            .clipShape(RoundedRectangle(cornerRadius: 35))
             .shadow(color: .black.opacity(0.3), radius: 15, x: 0, y: 10)
             
             // Search Circle
             tabItem(title: "Ara", icon: "magnifyingglass", tab: .search, isCircle: true)
-            
-            // Settings Circle Keep? Or maybe Settings is somewhere else.
-            // There's no settings in the screenshot's bottom bar. Maybe put settings in a circle next to search.
-            tabItem(title: "Ayarlar", icon: "gearshape.fill", tab: .settings, isCircle: true)
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 24)
@@ -1499,53 +1493,43 @@ struct ContentView: View {
             }
         }) {
             if isCircle {
-                VStack(spacing: 4) {
-                    Image(systemName: icon)
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundColor(currentTab == tab ? .white : .white.opacity(0.8))
-                }
-                .frame(width: 60, height: 60)
-                .background(
-                    ZStack {
-                        VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
-                        Color.white.opacity(0.1)
-                        if currentTab == tab {
-                            Circle()
-                                .fill(Color(hex: "007FFF").opacity(0.3)) // Optional selection effect
-                        }
-                    }
-                )
-                .overlay(
-                    Circle()
-                        .stroke(Color.white.opacity(0.2), lineWidth: 0.5)
-                )
-                .clipShape(Circle())
-                .shadow(color: .black.opacity(0.3), radius: 15, x: 0, y: 10)
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 60, height: 60)
+                    .background(
+                        VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+                    )
+                    .overlay(
+                        Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                    )
+                    .clipShape(Circle())
+                    .shadow(color: .black.opacity(0.3), radius: 15, x: 0, y: 10)
             } else {
                 VStack(spacing: 4) {
                     Image(systemName: icon)
-                        .font(.system(size: 20, weight: currentTab == tab ? .bold : .medium))
-                        .foregroundColor(currentTab == tab ? .white : .white.opacity(0.8))
+                        .font(.system(size: 22, weight: currentTab == tab ? .bold : .medium))
+                        .foregroundColor(currentTab == tab ? (tab == .library ? Color(hex: "4FA5FF") : .white) : .white.opacity(0.6))
                     
                     Text(title)
                         .font(.system(size: 11, weight: currentTab == tab ? .bold : .medium))
-                        .foregroundColor(currentTab == tab ? .white : .white.opacity(0.8))
+                        .foregroundColor(currentTab == tab ? (tab == .library ? Color(hex: "4FA5FF") : .white) : .white.opacity(0.6))
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
                 }
+                .frame(width: 85)
                 .padding(.vertical, 8)
-                .padding(.horizontal, 8)
                 .background(
-                    ZStack {
+                    Group {
                         if currentTab == tab {
-                            RoundedRectangle(cornerRadius: 30)
-                                .fill(LinearGradient(colors: [Color.white.opacity(0.3), Color.white.opacity(0.1)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            RoundedRectangle(cornerRadius: 24)
+                                .fill(Color.white.opacity(0.15))
                                 .matchedGeometryEffect(id: "navGlass", in: glassAnimation)
-                                .overlay(RoundedRectangle(cornerRadius: 30).stroke(Color.white.opacity(0.3), lineWidth: 0.5))
+                        } else {
+                            Color.clear
                         }
                     }
                 )
-                .frame(maxWidth: .infinity)
             }
         }
         .buttonStyle(TabButtonStyle())
@@ -1575,34 +1559,31 @@ struct ContentView: View {
                     VStack {
                         // Top Section
                         HStack(spacing: 16) {
-                            Button(action: {
-                                selectedChannel = nil
-                            }) {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .frame(width: 44, height: 44)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(Circle())
+                            HStack(spacing: 20) {
+                                Button(action: {
+                                    selectedChannel = nil
+                                }) {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
+                                
+                                Button(action: { cycleAspect() }) {
+                                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
+                                
+                                Button(action: { }) {
+                                    Image(systemName: "pip.enter")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
                             }
-                            
-                            Button(action: { cycleAspect() }) {
-                                Image(systemName: "arrow.up.backward.and.arrow.down.forward")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .frame(width: 44, height: 44)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(Circle())
-                            }
-                            
-                            Button(action: { }) {
-                                Image(systemName: "pip.enter")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .frame(width: 44, height: 44)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(Circle())
-                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 14)
+                            .background(Color.black.opacity(0.5))
+                            .clipShape(Capsule())
                             
                             Spacer()
                             
@@ -1614,8 +1595,8 @@ struct ContentView: View {
                                     .font(.system(size: 14))
                             }
                             .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(.ultraThinMaterial)
+                            .padding(.vertical, 14)
+                            .background(Color.black.opacity(0.5))
                             .clipShape(Capsule())
                         }
                         .padding(.horizontal, 40)
@@ -1623,20 +1604,8 @@ struct ContentView: View {
                         
                         Spacer()
                         
-                        // Center Play/Pause and Next/Prev Channel
-                        HStack(spacing: 40) {
-                            Button(action: {
-                                guard let cur = selectedChannel, let idx = channels.firstIndex(where: { $0.url == cur.url }), idx > 0 else { return }
-                                selectedChannel = channels[idx - 1]
-                                resetTimer()
-                            }) {
-                                    Image(systemName: "backward.end.fill")
-                                        .font(.system(size: 24, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .frame(width: 50, height: 50)
-                                        .opacity(0.8)
-                            }
-                            
+                        // Center Play/Pause 
+                        HStack {
                             Button(action: {
                                 if globalPlayerInfo.isPlaying {
                                     globalPlayerInfo.player?.pause()
@@ -1647,23 +1616,11 @@ struct ContentView: View {
                                 resetTimer()
                             }) {
                                 Image(systemName: globalPlayerInfo.isPlaying ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 40, weight: .black))
+                                    .font(.system(size: 44, weight: .bold))
                                     .foregroundColor(.white)
                                     .frame(width: 80, height: 80)
-                                    .background(Color.white.opacity(0.1))
+                                    .background(Color.white.opacity(0.15))
                                     .clipShape(Circle())
-                            }
-                            
-                            Button(action: {
-                                guard let cur = selectedChannel, let idx = channels.firstIndex(where: { $0.url == cur.url }), idx < channels.count - 1 else { return }
-                                selectedChannel = channels[idx + 1]
-                                resetTimer()
-                            }) {
-                                    Image(systemName: "forward.end.fill")
-                                        .font(.system(size: 24, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .frame(width: 50, height: 50)
-                                        .opacity(0.8)
                             }
                         }
 
