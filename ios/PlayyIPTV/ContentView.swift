@@ -3875,41 +3875,41 @@ extension View {
     func sexyGlass(cornerRadius: CGFloat = 20) -> some View {
         self.background(
             ZStack {
-                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
-                Color.white.opacity(0.08)
+                VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialLight))
+                Color.black.opacity(0.15)
             }
         )
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius)
                 .stroke(
                     LinearGradient(
-                        gradient: Gradient(colors: [Color.white.opacity(0.4), Color.white.opacity(0.1)]),
+                        gradient: Gradient(colors: [Color.white.opacity(0.6), Color.white.opacity(0.1)]),
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: 1
+                    lineWidth: 1.5
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 15)
+        .shadow(color: .black.opacity(0.6), radius: 25, x: 0, y: 20)
     }
     
     func sexyGlassCircle() -> some View {
         self.background(
             ZStack {
-                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
-                Color.white.opacity(0.08)
+                VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialLight))
+                Color.black.opacity(0.15)
             }
         )
         .overlay(
             Circle()
                 .stroke(
                     LinearGradient(
-                        gradient: Gradient(colors: [Color.white.opacity(0.4), Color.white.opacity(0.1)]),
+                        gradient: Gradient(colors: [Color.white.opacity(0.6), Color.white.opacity(0.1)]),
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: 1
+                    lineWidth: 1.5
                 )
         )
         .clipShape(Circle())
