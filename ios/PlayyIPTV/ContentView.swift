@@ -447,6 +447,12 @@ struct ContentView: View {
     @State private var showCategorySheet: Bool = false
     @State private var categorySearchQuery: String = ""
     @State private var isLoading: Bool = false
+    @State private var loadStep1: Bool = false
+    @State private var loadStep2: Bool = false
+    @State private var loadStep3: Bool = false
+    @State private var loadStep4: Bool = false
+    @State private var loadStep5: Bool = false
+    @State private var loadStepFinished: Bool = false
     @State private var loadingMessage: String = ""
     @State private var errorMessage: String? = nil
     
@@ -534,7 +540,13 @@ struct ContentView: View {
             loadFavourites()
             loadSavedData()
         }
-        
+        .overlay(
+            Group {
+                if isLoading {
+                    syncOverlayView
+                }
+            }
+        )
         .sheet(isPresented: $showCategorySheet) {
             categorySelectionSheet
         }
@@ -542,6 +554,108 @@ struct ContentView: View {
             accountsDrawerSheet
         }
         .preferredColorScheme(.dark) // Force dark color scheme to keep UI colors crisp
+    }
+    
+    var syncOverlayView: some View {
+        ZStack {
+            Color(hex: "101116").ignoresSafeArea()
+            
+            VStack(spacing: 24) {
+                if loadStepFinished {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 60))
+                        .foregroundColor(.green)
+                        .padding(.top, 40)
+                    
+                    Text("Her şey hazır!")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    Text("\(channels.filter({ $0.contentType == "live" }).count) kanal, \(channels.filter({ $0.contentType == "movie" }).count) film, \(channels.filter({ $0.contentType == "series" }).count) dizi")
+                        .font(.system(size: 14))
+                        .foregroundColor(.white.opacity(0.6))
+                        .padding(.bottom, 20)
+                } else {
+                    ZStack {
+                        Circle().fill(Color.white.opacity(0.05)).frame(width: 80, height: 80)
+                        Image(systemName: "film")
+                            .font(.system(size: 32))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.top, 40)
+                    
+                    Text("İçeriğiniz hazırlanıyor")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.white)
+                    
+                    Text(loadingMessage)
+                        .font(.system(size: 14))
+                        .foregroundColor(.white.opacity(0.6))
+                        .padding(.bottom, 20)
+                }
+                
+                VStack(alignment: .leading, spacing: 16) {
+                    syncStepRow(text: "Sunucuya bağlanılıyor", isDone: loadStep1, inProgress: isLoading && !loadStepFinished && !loadStep1)
+                    syncStepRow(text: "Canlı kanallar eşitleniyor", isDone: loadStep2, inProgress: loadStep1 && !loadStep2)
+                    syncStepRow(text: "Filmler eşitleniyor", isDone: loadStep3, inProgress: loadStep2 && !loadStep3)
+                    syncStepRow(text: "Diziler eşitleniyor", isDone: loadStep4, inProgress: loadStep3 && !loadStep4)
+                    syncStepRow(text: "İçerik eşleştiriliyor", isDone: loadStep5, inProgress: loadStep4 && !loadStep5)
+                }
+                .padding(24)
+                .background(Color(hex: "1C1C1E"))
+                .cornerRadius(16)
+                .padding(.horizontal, 30)
+                
+                Spacer()
+            }
+            .padding(.top, 40)
+            
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        if loadStepFinished {
+                            isLoading = false
+                            showAccountsSheet = false
+                            providerSheetState = 0
+                            currentTab = .home
+                        } else {
+                            isLoading = false
+                        }
+                    }) {
+                        Text("Bitti")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.2), lineWidth: 1))
+                            .frame(height: 32)
+                    }
+                    .padding(.trailing, 20)
+                    .padding(.top, 20)
+                }
+                Spacer()
+            }
+        }
+    }
+    
+    func syncStepRow(text: String, isDone: Bool, inProgress: Bool) -> some View {
+        HStack(spacing: 12) {
+            if isDone {
+                Image(systemName: "checkmark.circle.fill").foregroundColor(.green).font(.system(size: 20))
+            } else if inProgress {
+                ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.6)))
+                    .frame(width: 20, height: 20)
+            } else {
+                Image(systemName: "circle").foregroundColor(.white.opacity(0.2)).font(.system(size: 20))
+            }
+            
+            Text(text)
+                .font(.system(size: 15))
+                .foregroundColor(isDone || inProgress ? .white : .white.opacity(0.3))
+            
+            Spacer()
+        }
     }
     
     // MARK: - New Architecture Views
@@ -944,50 +1058,17 @@ struct ContentView: View {
                 }
                 
                 if libraryFilter == "Öne çıkanlar" {
-                    let featuredMovies: [Channel] = {
-                        var list = [Channel]()
-                        var seen = Set<String>()
-                        for ch in channels.filter({ $0.contentType == "movie" }) {
-                            if !seen.contains(ch.name) {
-                                seen.insert(ch.name)
-                                list.append(ch)
-                            }
-                            if list.count >= 10 { break }
-                        }
-                        return list
-                    }()
+                    let featuredMovies = getUniqueChannels(type: "movie", limit: 10, reversed: false)
                     if !featuredMovies.isEmpty {
                         libraryHorizontalRankedSection(title: "Öne çıkan filmler", items: featuredMovies)
                     }
                     
-                    let featuredSeries: [Channel] = {
-                        var list = [Channel]()
-                        var seen = Set<String>()
-                        for ch in channels.filter({ $0.contentType == "series" }) {
-                            if !seen.contains(ch.name) {
-                                seen.insert(ch.name)
-                                list.append(ch)
-                            }
-                            if list.count >= 10 { break }
-                        }
-                        return list
-                    }()
+                    let featuredSeries = getUniqueChannels(type: "series", limit: 10, reversed: false)
                     if !featuredSeries.isEmpty {
                         libraryHorizontalRankedSection(title: "Öne çıkan diziler", items: featuredSeries)
                     }
                     
-                    let recentMovies: [Channel] = {
-                        var list = [Channel]()
-                        var seen = Set<String>()
-                        for ch in channels.filter({ $0.contentType == "movie" }).reversed() {
-                            if !seen.contains(ch.name) {
-                                seen.insert(ch.name)
-                                list.append(ch)
-                            }
-                            if list.count >= 15 { break }
-                        }
-                        return list
-                    }()
+                    let recentMovies = getUniqueChannels(type: "movie", limit: 15, reversed: true)
                     
                     if !recentMovies.isEmpty {
                         libraryHorizontalPortraitSection(title: "Son eklenen filmler", items: recentMovies)
@@ -1247,40 +1328,41 @@ struct ContentView: View {
     }
 
     var homeTabContent: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 0) {
-                if let hero = channels.filter({ $0.contentType == "movie" }).first ?? channels.first {
-                    ZStack(alignment: .bottom) {
-                        if let url = URL(string: hero.logo) {
-                            AsyncImage(url: url) { phase in
-                                if let image = phase.image {
-                                    image.resizable().aspectRatio(contentMode: .fill).frame(height: 520).clipped()
-                                } else {
-                                    Color.white.opacity(0.05).frame(height: 520)
+        ZStack(alignment: .top) {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    if let hero = channels.filter({ $0.contentType == "movie" }).first ?? channels.first {
+                        ZStack(alignment: .bottom) {
+                            if let url = URL(string: hero.logo) {
+                                AsyncImage(url: url) { phase in
+                                    if let image = phase.image {
+                                        image.resizable().aspectRatio(contentMode: .fill).frame(height: 520).clipped()
+                                    } else {
+                                        Color.white.opacity(0.05).frame(height: 520)
+                                    }
                                 }
                             }
-                        }
-                        
-                        LinearGradient(colors: [.clear, Color(hex: "08090C")], startPoint: .center, endPoint: .bottom).frame(height: 520)
-                        
-                        VStack(spacing: 16) {
-                            Text(hero.name)
-                                .font(.system(size: 32, weight: .black))
-                                .foregroundColor(.white)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 20)
-                                .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 2)
                             
-                            HStack(spacing: 16) {
-                                Button(action: {
-                                    selectedChannel = hero
-                                }) {
-                                    HStack {
-                                        Image(systemName: "play.fill")
-                                        Text("Oynat")
-                                    }
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.black)
+                            LinearGradient(colors: [.clear, Color(hex: "08090C")], startPoint: .center, endPoint: .bottom).frame(height: 520)
+                            
+                            VStack(spacing: 16) {
+                                Text(hero.name)
+                                    .font(.system(size: 32, weight: .black))
+                                    .foregroundColor(.white)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 20)
+                                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 2)
+                                
+                                HStack(spacing: 16) {
+                                    Button(action: {
+                                        selectedChannel = hero
+                                    }) {
+                                        HStack {
+                                            Image(systemName: "play.fill")
+                                            Text("Oynat")
+                                        }
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.black)
                                     .padding(.horizontal, 32)
                                     .padding(.vertical, 14)
                                     .background(Color.white)
@@ -1336,6 +1418,50 @@ struct ContentView: View {
             }
         }
         .ignoresSafeArea(edges: .top)
+        
+        // Top Header Overlay
+            HStack {
+                Text("Ana sayfa")
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundColor(.white)
+                    .shadow(color: .black.opacity(0.8), radius: 2)
+                Spacer()
+                
+                HStack(spacing: 12) {
+                    Button(action: {
+                        // Reload Action
+                        if !activeAccountIdString.isEmpty {
+                            if let acc = accounts.first(where: { $0.id.uuidString == activeAccountIdString }) {
+                                if acc.mode == 0 {
+                                    fetchM3uDataInSheet(acc.m3uUrl)
+                                } else {
+                                    fetchXtreamDataInSheet(host: acc.xtreamHost, user: acc.xtreamUser, pass: acc.xtreamPass)
+                                }
+                            }
+                        }
+                    }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark)))
+                            .clipShape(Circle())
+                    }
+                    Button(action: {
+                        showAccountsSheet = true
+                    }) {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark)))
+                            .clipShape(Circle())
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 50)
+        }
     }
     
     func homeCategoryRow(title: String, type: String) -> some View {
@@ -1464,20 +1590,46 @@ struct ContentView: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 6)
             .background(
-                VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+                ZStack {
+                    VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+                    Color.white.opacity(0.08)
+                }
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 35)
-                    .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                    .stroke(
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.white.opacity(0.4), Color.white.opacity(0.1)]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
             )
             .clipShape(RoundedRectangle(cornerRadius: 35))
-            .shadow(color: .black.opacity(0.3), radius: 15, x: 0, y: 10)
+            .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 15)
             
             // Search Circle
             tabItem(title: "Ara", icon: "magnifyingglass", tab: .search, isCircle: true)
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 24)
+    }
+
+    func getUniqueChannels(type: String, limit: Int, reversed: Bool) -> [Channel] {
+        var list = [Channel]()
+        var seen = Set<String>()
+        let filtered = channels.filter { $0.contentType == type }
+        let iterator = reversed ? AnySequence(filtered.reversed()) : AnySequence(filtered)
+        
+        for ch in iterator {
+            if !seen.contains(ch.name) {
+                seen.insert(ch.name)
+                list.append(ch)
+            }
+            if list.count >= limit { break }
+        }
+        return list
     }
 
     func tabItem(title: String, icon: String, tab: AppTab, isCircle: Bool = false) -> some View {
@@ -1498,13 +1650,23 @@ struct ContentView: View {
                     .foregroundColor(.white)
                     .frame(width: 60, height: 60)
                     .background(
-                        VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+                        ZStack {
+                            VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+                            Color.white.opacity(0.08)
+                        }
                     )
                     .overlay(
-                        Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                        Circle().stroke(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.white.opacity(0.4), Color.white.opacity(0.1)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
                     )
                     .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.3), radius: 15, x: 0, y: 10)
+                    .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 15)
             } else {
                 VStack(spacing: 4) {
                     Image(systemName: icon)
@@ -1558,46 +1720,42 @@ struct ContentView: View {
                     
                     VStack {
                         // Top Section
-                        HStack(spacing: 16) {
-                            HStack(spacing: 20) {
+                        HStack {
+                            // Top Left: Separated Circle buttons
+                            HStack(spacing: 12) {
                                 Button(action: {
                                     selectedChannel = nil
                                 }) {
                                     Image(systemName: "xmark")
                                         .font(.system(size: 16, weight: .bold))
                                         .foregroundColor(.white)
+                                        .frame(width: 44, height: 44)
+                                        .background(Color.black.opacity(0.4))
+                                        .clipShape(Circle())
                                 }
                                 
                                 Button(action: { cycleAspect() }) {
                                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                                         .font(.system(size: 16, weight: .bold))
                                         .foregroundColor(.white)
+                                        .frame(width: 44, height: 44)
+                                        .background(Color.black.opacity(0.4))
+                                        .clipShape(Circle())
                                 }
                                 
                                 Button(action: { }) {
                                     Image(systemName: "pip.enter")
                                         .font(.system(size: 16, weight: .bold))
                                         .foregroundColor(.white)
+                                        .frame(width: 44, height: 44)
+                                        .background(Color.black.opacity(0.4))
+                                        .clipShape(Circle())
                                 }
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 14)
-                            .background(Color.black.opacity(0.5))
-                            .clipShape(Capsule())
                             
                             Spacer()
                             
-                            // Top Right: Volume Indicator
-                            HStack(spacing: 8) {
-                                Capsule().fill(.white.opacity(0.3)).frame(width: 60, height: 4)
-                                Image(systemName: "speaker.wave.3.fill")
-                                    .foregroundColor(.white)
-                                    .font(.system(size: 14))
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
-                            .background(Color.black.opacity(0.5))
-                            .clipShape(Capsule())
+                            // Top Right: Kept empty to ensure no watermark/logo
                         }
                         .padding(.horizontal, 40)
                         .padding(.top, 20)
@@ -1619,7 +1777,7 @@ struct ContentView: View {
                                     .font(.system(size: 44, weight: .bold))
                                     .foregroundColor(.white)
                                     .frame(width: 80, height: 80)
-                                    .background(Color.white.opacity(0.15))
+                                    .background(Color.black.opacity(0.4))
                                     .clipShape(Circle())
                             }
                         }
@@ -1627,95 +1785,84 @@ struct ContentView: View {
                         Spacer()
                         
                         // Bottom Section
-                        VStack(spacing: 8) {
-                            HStack(alignment: .bottom) {
+                        HStack(alignment: .bottom) {
+                            // Bottom Left: Live badge + Channel info
+                            HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 4) {
+                                    // CANLI badge
                                     HStack(spacing: 4) {
                                         Circle().fill(Color.red).frame(width: 6, height: 6)
                                         Text("CANLI")
                                             .font(.system(size: 10, weight: .black))
                                             .foregroundColor(.red)
                                     }
-                                    HStack(spacing: 6) {
-                                        Text(channel.name)
-                                            .font(.system(size: 20, weight: .bold))
-                                            .foregroundColor(.white)
-                                        Text("· \(channel.safeGroup)")
-                                            .font(.system(size: 16, weight: .regular))
-                                            .foregroundColor(.white.opacity(0.7))
-                                    }
-                                }
-                                .padding(.bottom, 4)
-                                
-                                Spacer()
-                                
-                                HStack(spacing: 12) {
-                                    Button(action: {
-                                        // Settings toast feedback or action
-                                        resetTimer()
-                                    }) {
-                                        Image(systemName: "gearshape")
-                                            .font(.system(size: 18, weight: .medium))
-                                            .foregroundColor(.white)
-                                            .frame(width: 44, height: 44)
-                                            .background(.ultraThinMaterial)
-                                            .clipShape(Circle())
-                                    }
-                                    Button(action: { cycleAspect(); resetTimer() }) {
-                                        Image(systemName: "tv")
-                                            .font(.system(size: 18, weight: .medium))
-                                            .foregroundColor(.white)
-                                            .frame(width: 44, height: 44)
-                                            .background(.ultraThinMaterial)
-                                            .clipShape(Circle())
-                                    }
-                                    Button(action: {
-                                        toggleFavourite(channel.url)
-                                        resetTimer()
-                                    }) {
-                                        Image(systemName: favourites.contains(channel.url) ? "bookmark.fill" : "bookmark")
-                                            .font(.system(size: 18, weight: .medium))
-                                            .foregroundColor(favourites.contains(channel.url) ? .yellow : .white)
-                                            .frame(width: 44, height: 44)
-                                            .background(.ultraThinMaterial)
-                                            .clipShape(Circle())
-                                    }
-                                    Button(action: {
-                                        // Toggle list visibility logic could go here
-                                        resetTimer()
-                                    }) {
-                                        Image(systemName: "list.bullet")
-                                            .font(.system(size: 18, weight: .medium))
-                                            .foregroundColor(.white)
-                                            .frame(width: 44, height: 44)
-                                            .background(.ultraThinMaterial)
-                                            .clipShape(Circle())
-                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.black.opacity(0.5))
+                                    .cornerRadius(4)
+                                    
+                                    // Channel Name & fake EPG
+                                    Text(channel.name)
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .lineLimit(1)
+                                    
+                                    Text(channel.safeGroup) // Using safeGroup as EPG placeholder
+                                        .font(.system(size: 14, weight: .regular))
+                                        .foregroundColor(.white.opacity(0.6))
+                                        .lineLimit(1)
                                 }
                             }
                             
-                            // Progress line
-                            Rectangle()
-                                .fill(Color.white.opacity(0.3))
-                                .frame(height: 3)
-                                .overlay(
-                                    Rectangle().fill(Color.white).frame(width: 200),
-                                    alignment: .leading
-                                )
-                                .cornerRadius(1.5)
-                                
-                            HStack {
-                                Text("Şimdi: Mevcut Yayın")
-                                    .font(.system(size: 12, weight: .regular))
-                                    .foregroundColor(.white.opacity(0.6))
-                                Spacer()
-                                Text("Sonraki: Sıradaki Yayın")
-                                    .font(.system(size: 12, weight: .regular))
-                                    .foregroundColor(.white.opacity(0.6))
+                            Spacer()
+                            
+                            // Bottom Right: Actions
+                            HStack(spacing: 12) {
+                                Button(action: {
+                                    // Settings toast feedback or action
+                                    resetTimer()
+                                }) {
+                                    Image(systemName: "gearshape.fill")
+                                        .font(.system(size: 18, weight: .medium))
+                                        .foregroundColor(.white)
+                                        .frame(width: 44, height: 44)
+                                        .background(Color.black.opacity(0.4))
+                                        .clipShape(Circle())
+                                }
+                                Button(action: { cycleAspect(); resetTimer() }) {
+                                    Image(systemName: "tv")
+                                        .font(.system(size: 18, weight: .medium))
+                                        .foregroundColor(.white)
+                                        .frame(width: 44, height: 44)
+                                        .background(Color.black.opacity(0.4))
+                                        .clipShape(Circle())
+                                }
+                                Button(action: {
+                                    toggleFavourite(channel.url)
+                                    resetTimer()
+                                }) {
+                                    Image(systemName: favourites.contains(channel.url) ? "bookmark.fill" : "bookmark")
+                                        .font(.system(size: 18, weight: .medium))
+                                        .foregroundColor(favourites.contains(channel.url) ? .yellow : .white)
+                                        .frame(width: 44, height: 44)
+                                        .background(Color.black.opacity(0.4))
+                                        .clipShape(Circle())
+                                }
+                                Button(action: {
+                                    // Show channels list
+                                    resetTimer()
+                                }) {
+                                    Image(systemName: "list.bullet")
+                                        .font(.system(size: 18, weight: .medium))
+                                        .foregroundColor(.white)
+                                        .frame(width: 44, height: 44)
+                                        .background(Color.black.opacity(0.4))
+                                        .clipShape(Circle())
+                                }
                             }
                         }
                         .padding(.horizontal, 40)
-                        .padding(.bottom, 20)
+                        .padding(.bottom, 40)
                     }
                     .zIndex(999)
                 }
@@ -2527,6 +2674,12 @@ struct ContentView: View {
     
     func parseM3UContent(_ text: String) {
         isLoading = true
+        loadStep1 = true
+        loadStep2 = false
+        loadStep3 = false
+        loadStep4 = false
+        loadStep5 = false
+        loadStepFinished = false
         loadingMessage = "Yayınlar düzenleniyor..."
         
         DispatchQueue.global(qos: .userInitiated).async {
@@ -2535,6 +2688,8 @@ struct ContentView: View {
             var currentName = ""
             var currentGroup = "Genel"
             var currentLogo = ""
+            
+            DispatchQueue.main.async { self.loadStep2 = true; self.loadingMessage = "Kanallar ayrıştırılıyor..." }
             
             for line in lines {
                 let clean = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2591,8 +2746,12 @@ struct ContentView: View {
             }
             
             DispatchQueue.main.async {
+                self.loadStep3 = true
+                self.loadStep4 = true
+                self.loadStep5 = true
+                self.loadStepFinished = true
                 self.channels = loaded
-                self.isLoading = false
+                // Keep spinning or waiting for the user to press Bitti
             }
         }
     }
@@ -2605,8 +2764,14 @@ struct ContentView: View {
             return
         }
         
-        sheetIsLoading = true
-        sheetLoadingMessage = "Liste sunucudan indiriliyor..."
+        isLoading = true
+        loadStep1 = false
+        loadStep2 = false
+        loadStep3 = false
+        loadStep4 = false
+        loadStep5 = false
+        loadStepFinished = false
+        loadingMessage = "Bağlanılıyor..."
         sheetError = nil
         
         var request = URLRequest(url: url)
@@ -2615,7 +2780,7 @@ struct ContentView: View {
         URLSession.shared.dataTask(with: request) { data, _, err in
             if let err = err {
                 DispatchQueue.main.async {
-                    self.sheetIsLoading = false
+                    self.isLoading = false
                     self.sheetError = "Bağlantı Hatası: \(err.localizedDescription)"
                 }
                 return
@@ -2623,13 +2788,14 @@ struct ContentView: View {
             
             guard let data = data, let text = String(data: data, encoding: .utf8) else {
                 DispatchQueue.main.async {
-                    self.sheetIsLoading = false
+                    self.isLoading = false
                     self.sheetError = "M3U listesi boş veya okunamaz formatta."
                 }
                 return
             }
             
             DispatchQueue.main.async {
+                self.loadStep1 = true
                 let hostName = URL(string: clean)?.host ?? "M3U Playlist"
                 let newAccountId = UUID()
                 let newAcc = IPTVAccount(id: newAccountId, name: hostName, mode: 0, m3uUrl: clean)
@@ -2646,7 +2812,6 @@ struct ContentView: View {
                 try? text.write(to: self.getM3uFilePath(), atomically: true, encoding: .utf8)
                 
                 self.m3uUrl = clean
-                self.sheetLoadingMessage = "Yayınlar listeleniyor..."
                 
                 if let creds = self.extractXtreamCredentials(from: clean) {
                     self.fetchServerInfo(host: creds.host, user: creds.user, pass: creds.pass)
@@ -2657,12 +2822,8 @@ struct ContentView: View {
                     self.serverStatus = "Aktif"
                 }
                 
-                // Parse and close on success
+                // Parse and keep Sync UI going
                 self.parseM3UContent(text)
-                self.sheetIsLoading = false
-                self.showAccountsSheet = false
-                self.providerSheetState = 0
-                self.currentTab = .home
             }
         }.resume()
     }
@@ -2687,8 +2848,14 @@ struct ContentView: View {
             return
         }
         
-        sheetIsLoading = true
-        sheetLoadingMessage = "Kategoriler indiriliyor..."
+        isLoading = true
+        loadStep1 = true // Connected
+        loadStep2 = false
+        loadStep3 = false
+        loadStep4 = false
+        loadStep5 = false
+        loadStepFinished = false
+        loadingMessage = "Filmler eşitleniyor..."
         sheetError = nil
         
         let dispatchGroup = DispatchGroup()
@@ -2736,6 +2903,8 @@ struct ContentView: View {
         }.resume()
         
         dispatchGroup.notify(queue: .global(qos: .userInitiated)) {
+            DispatchQueue.main.async { self.loadStep2 = true; self.loadingMessage = "Canlı kanallar eşitleniyor..." }
+            
             let streamGroup = DispatchGroup()
             
             // 4. Fetch Live streams
@@ -2763,6 +2932,7 @@ struct ContentView: View {
             streamGroup.enter()
             URLSession.shared.dataTask(with: vodStreamsUrl) { data, _, _ in
                 defer { streamGroup.leave() }
+                DispatchQueue.main.async { self.loadStep3 = true; self.loadingMessage = "Diziler eşitleniyor..." }
                 struct XtreamMovie: Codable {
                     let name: String?
                     let stream_name: String?
@@ -2791,6 +2961,7 @@ struct ContentView: View {
             streamGroup.enter()
             URLSession.shared.dataTask(with: seriesStreamsUrl) { data, _, _ in
                 defer { streamGroup.leave() }
+                DispatchQueue.main.async { self.loadStep4 = true; self.loadingMessage = "İçerik eşleştiriliyor..." }
                 struct XtreamSeries: Codable {
                     let name: String?
                     let stream_name: String?
@@ -2815,9 +2986,13 @@ struct ContentView: View {
             
             streamGroup.notify(queue: .main) {
                 self.sheetIsLoading = false
+                
                 if fetchedChannels.isEmpty {
+                    self.isLoading = false
                     self.sheetError = internalError ?? "Girilen bilgilerle aktif bir yayın listesine ulaşılamadı. Lütfen sunucu durumunu veya bilgilerinizi kontrol edin."
                 } else {
+                    self.loadStep5 = true
+                    self.loadStepFinished = true
                     self.channels = fetchedChannels
                     self.xtreamHost = cleanHost
                     self.xtreamUser = user
@@ -2843,10 +3018,7 @@ struct ContentView: View {
                         try? encoded.write(to: self.getXtreamFilePath())
                     }
                     
-                    // Dismiss on successful authentication
-                    self.showAccountsSheet = false
-                    self.providerSheetState = 0
-                    self.currentTab = .home
+                    // Keep loading view visible until user hits Bitti
                 }
             }
         }
@@ -2888,122 +3060,114 @@ struct ContentView: View {
     
         // MARK: - Providers Main List
     var providersMainList: some View {
-        VStack {
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(accounts) { acc in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: acc.mode == 0 ? "link.circle.fill" : "server.rack")
-                                        .foregroundColor(activeAccountIdString == acc.id.uuidString ? Color(hex: "6D28D9") : .white.opacity(0.7))
-                                        .font(.system(size: 14))
-                                    Text(acc.name)
-                                        .font(.system(size: 14, weight: .bold))
-                                        .foregroundColor(activeAccountIdString == acc.id.uuidString ? Color(hex: "6D28D9") : .white)
-                                        .lineLimit(1)
-                                }
-                                
-                                Text(acc.mode == 0 ? "M3U: \(acc.m3uUrl)" : "Host: \(acc.xtreamHost)")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.white.opacity(0.4))
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            
-                            if activeAccountIdString == acc.id.uuidString {
-                                HStack(spacing: 8) {
-                                    Text("AKTİF")
-                                        .font(.system(size: 9, weight: .black))
-                                        .foregroundColor(.black)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(Color(hex: "6D28D9"))
-                                        .cornerRadius(6)
-                                        
-                                    Button(action: {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Sağlayıcılar")
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+                
+                // Active or Loaded Accounts
+                if !accounts.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Hesaplarınız")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white.opacity(0.6))
+                            .padding(.horizontal, 20)
+                        
+                        VStack(spacing: 0) {
+                            ForEach(accounts.indices, id: \.self) { index in
+                                let acc = accounts[index]
+                                Button(action: {
+                                    if activeAccountIdString == acc.id.uuidString {
                                         selectedDetailAccount = acc
                                         providerSheetState = 3
-                                    }) {
-                                        Image(systemName: "info.circle.fill")
-                                            .foregroundColor(.white.opacity(0.6))
-                                            .font(.system(size: 16))
+                                    } else {
+                                        switchAccount(to: acc)
+                                        providerSheetState = 0
                                     }
-                                    .buttonStyle(PlainButtonStyle())
-                                }
-                            } else {
-                                Button(action: {
-                                    switchAccount(to: acc)
-                                    providerSheetState = 0
                                 }) {
-                                    Text("YÜKLE")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 6)
-                                        .background(Color.white.opacity(0.08))
-                                        .cornerRadius(6)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
-                            
-                            Button(action: {
-                                if let idx = accounts.firstIndex(where: { $0.id == acc.id }) {
-                                    let oldId = accounts[idx].id.uuidString
-                                    let m3uFile = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("saved_playlist_\(oldId).m3u")
-                                    let jsonFile = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("xtream_cache_\(oldId).json")
-                                    try? FileManager.default.removeItem(at: m3uFile)
-                                    try? FileManager.default.removeItem(at: jsonFile)
-                                    
-                                    accounts.remove(at: idx)
-                                    saveAccounts()
-                                    
-                                    if activeAccountIdString == oldId {
-                                        if let next = accounts.first {
-                                            switchAccount(to: next)
-                                        } else {
-                                            activeAccountIdString = ""
-                                            channels = []
+                                    HStack {
+                                        Image(systemName: acc.mode == 0 ? "list.bullet.rectangle.portrait" : "server.rack")
+                                            .foregroundColor(.white)
+                                            .frame(width: 32, height: 32)
+                                            .background(acc.mode == 0 ? Color.blue : Color(hex: "E0218A"))
+                                            .cornerRadius(6)
+                                        
+                                        Text(acc.name)
+                                            .font(.system(size: 16))
+                                            .foregroundColor(.white)
+                                            .padding(.left, 8)
+                                        
+                                        Spacer()
+                                        
+                                        if activeAccountIdString == acc.id.uuidString {
+                                            Image(systemName: "checkmark")
+                                                .foregroundColor(.green)
+                                                .padding(.trailing, 8)
                                         }
+                                        
+                                        Image(systemName: "chevron.right")
+                                            .foregroundColor(.white.opacity(0.4))
+                                            .font(.system(size: 14, weight: .semibold))
                                     }
+                                    .padding(.vertical, 12)
+                                    .padding(.horizontal, 16)
                                 }
-                            }) {
-                                Image(systemName: "trash.fill")
-                                    .foregroundColor(.red.opacity(0.7))
-                                    .font(.system(size: 14))
-                                    .padding(8)
+                                if index < accounts.count - 1 { Divider().background(Color.white.opacity(0.1)).padding(.leading, 56) }
                             }
-                            .buttonStyle(PlainButtonStyle())
                         }
-                        .padding()
-                        .background(activeAccountIdString == acc.id.uuidString ? Color.white.opacity(0.06) : Color(hex: "121420").opacity(0.4))
+                        .background(Color(hex: "1C1C1E"))
                         .cornerRadius(12)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(activeAccountIdString == acc.id.uuidString ? Color(hex: "6D28D9").opacity(0.3) : Color.white.opacity(0.02), lineWidth: 1)
-                        )
+                        .padding(.horizontal, 20)
                     }
                 }
-                .padding(.horizontal, 20)
                 
-                Button(action: {
-                    providerSheetState = 1 // or another sheet state for adding
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus")
-                        Text("YENİ OYNATMA LİSTESİ EKLE")
+                // Existing items ...
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("IPTV")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white.opacity(0.6))
+                        .padding(.horizontal, 20)
+                    
+                    VStack(spacing: 0) {
+                        Button(action: { providerSheetState = 1 }) {
+                            HStack {
+                                Image(systemName: "doc.text.fill")
+                                    .foregroundColor(.white)
+                                    .frame(width: 28, height: 28)
+                                    .background(Color.blue)
+                                    .cornerRadius(6)
+                                Text("M3U").font(.system(size: 16)).foregroundColor(.white).padding(.left, 8)
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundColor(.white.opacity(0.4)).font(.system(size: 14, weight: .semibold))
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                        }
+                        Divider().background(Color.white.opacity(0.1)).padding(.leading, 56)
+                        Button(action: { providerSheetState = 2 }) {
+                            HStack {
+                                Image(systemName: "list.dash.header.rectangle")
+                                    .foregroundColor(.white)
+                                    .frame(width: 28, height: 28)
+                                    .background(Color(hex: "E0218A"))
+                                    .cornerRadius(6)
+                                Text("Xtream").font(.system(size: 16)).foregroundColor(.white).padding(.left, 8)
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundColor(.white.opacity(0.4)).font(.system(size: 14, weight: .semibold))
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                        }
                     }
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.black)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color(hex: "6D28D9"))
+                    .background(Color(hex: "1C1C1E"))
                     .cornerRadius(12)
                     .padding(.horizontal, 20)
                 }
-                .buttonStyle(PlainButtonStyle())
-                .padding(.top, 20)
-                .padding(.bottom, 120) // Massive clear padding to ensure it can scroll above the tab bar
+                
+                Spacer().frame(height: 120)
             }
         }
     }
@@ -3208,132 +3372,226 @@ struct ContentView: View {
     }
     
     var accountDetailView: some View {
-        ScrollView {
+        ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 20) {
                 if let acc = selectedDetailAccount {
-                    
-                    // Main Title Card
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(acc.name)
-                            .font(.system(size: 28, weight: .black))
-                            .foregroundColor(.white)
-                        if acc.mode == 1 {
-                             Text("Xtream Codes Sunucusu")
-                                 .font(.system(size: 13, weight: .bold))
-                                 .foregroundColor(Color(hex: "6D28D9"))
-                        } else {
-                             Text("M3U Oynatma Listesi")
-                                 .font(.system(size: 13, weight: .bold))
-                                 .foregroundColor(Color(hex: "6D28D9"))
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 10)
-                    
-                    if activeAccountIdString == acc.id.uuidString {
-                        // Connection Info Card
-                        VStack(spacing: 16) {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("Sunucu Durumu").font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.5))
-                                    HStack(spacing: 4) {
-                                        Circle().fill(Color.green).frame(width: 8, height: 8)
-                                        Text(serverStatus.isEmpty ? "Aktif" : serverStatus).font(.system(size: 15, weight: .bold)).foregroundColor(.white)
-                                    }
-                                }
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 6) {
-                                    Text("Bitiş Tarihi").font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.5))
-                                    Text(serverExpiry.isEmpty ? "Yok" : serverExpiry).font(.system(size: 15, weight: .bold)).foregroundColor(.white)
-                                }
-                            }
-                            
-                            Divider().background(Color.white.opacity(0.1))
-                            
-                            HStack {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("Bağlantı İzni").font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.5))
-                                    Text(serverMaxCons.isEmpty ? "-" : serverMaxCons).font(.system(size: 15, weight: .bold)).foregroundColor(.white)
-                                }
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 6) {
-                                    Text("Aktif Bağlantı").font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.5))
-                                    Text(serverActiveCons.isEmpty ? "-" : serverActiveCons).font(.system(size: 15, weight: .bold)).foregroundColor(.white)
-                                }
-                            }
-                        }
-                        .padding(20)
-                        .background(Color(hex: "1F2131"))
-                        .cornerRadius(20)
-                        .padding(.horizontal, 20)
-                        
-                        // Content Stats
-                        HStack(spacing: 12) {
-                            contentStatBox(title: "Canlı TV", count: channels.filter({ $0.contentType == "live" }).count, icon: "tv.fill")
-                            contentStatBox(title: "Filmler", count: channels.filter({ $0.contentType == "movie" }).count, icon: "film.fill")
-                            contentStatBox(title: "Diziler", count: channels.filter({ $0.contentType == "series" }).count, icon: "play.rectangle.fill")
-                        }
-                        .padding(.horizontal, 20)
-                        
-                        // Refresh Button
-                        Button(action: {
-                            if acc.mode == 0 { fetchM3uDataInSheet(acc.m3uUrl) }
-                            else { fetchXtreamDataInSheet(host: acc.xtreamHost, user: acc.xtreamUser, pass: acc.xtreamPass) }
-                        }) {
-                            HStack {
-                                Image(systemName: "arrow.clockwise")
-                                Text("İÇERİKLERİ VE BİLGİLERİ GÜNCELLE")
-                            }
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.black)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color(hex: "6D28D9"))
-                            .cornerRadius(14)
-                        }
-                        .padding(.horizontal, 20)
+                    Text("IPTV")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
                         .padding(.top, 10)
+                    
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Sunucu bilgisi")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white.opacity(0.6))
+                            .padding(.horizontal, 20)
                         
-                    } else {
-                        VStack(spacing: 12) {
-                            Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.yellow).font(.system(size: 30))
-                            Text("Detayları, kanalları ve güncel hesap durumunu görebilmek için öncelikle bu sunucuya bağlanmalısınız.")
-                                .font(.system(size: 13))
-                                .foregroundColor(.white.opacity(0.6))
-                                .multilineTextAlignment(.center)
+                        VStack(spacing: 0) {
+                            HStack {
+                                Image(systemName: "wifi")
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .frame(width: 24)
+                                Text("Durum:")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .padding(.left, 4)
+                                Text("ACTIVE") // Could be parameterized in a real scenario
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.left, 4)
+                                Spacer()
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                            
+                            Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
+                            
+                            HStack {
+                                Image(systemName: "point.3.connected.trianglepath.dotted")
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .frame(width: 24)
+                                Text("Bağlantılar:")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .padding(.left, 4)
+                                Text(serverMaxCons.isEmpty ? "0/2" : serverMaxCons)
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.left, 4)
+                                Spacer()
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                            
+                            Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
+                            
+                            HStack {
+                                Image(systemName: "calendar")
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .frame(width: 24)
+                                Text("Sona eriyor:")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .padding(.left, 4)
+                                Text(serverExpiry.isEmpty ? "27 Şub 2027" : serverExpiry)
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.left, 4)
+                                Spacer()
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
                         }
-                        .padding(30)
-                        .background(Color(hex: "1F2131"))
-                        .cornerRadius(20)
+                        .background(Color(hex: "1C1C1E"))
+                        .cornerRadius(12)
                         .padding(.horizontal, 20)
                     }
                     
-                    Spacer(minLength: 20)
-                    
-                    Button(action: {
-                        if activeAccountIdString == acc.id.uuidString {
-                            activeAccountIdString = ""
-                            channels = []
-                        }
-                        accounts.removeAll(where: { $0.id == acc.id })
-                        saveAccounts()
-                        providerSheetState = 0
-                    }) {
-                        Text("BU SUNUCUYU SİL")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color.red.opacity(0.8))
-                            .cornerRadius(14)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Ayarlar")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white.opacity(0.6))
                             .padding(.horizontal, 20)
+                        
+                        VStack(spacing: 0) {
+                            Button(action: {
+                                // Reload
+                                if acc.mode == 0 {
+                                    fetchM3UData(url: acc.m3uUrl)
+                                } else {
+                                    fetchXtreamData(host: acc.xtreamHost, user: acc.xtreamUser, pass: acc.xtreamPass)
+                                }
+                            }) {
+                                HStack {
+                                    Image(systemName: "arrow.clockwise")
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .frame(width: 24)
+                                    Text("Yeniden yükle")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.white)
+                                        .padding(.left, 4)
+                                    Spacer()
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                            }
+                            
+                            Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
+                            
+                            Button(action: {}) {
+                                HStack {
+                                    Image(systemName: "pencil")
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .frame(width: 24)
+                                    Text("Detayları düzenle")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.white)
+                                        .padding(.left, 4)
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundColor(.white.opacity(0.4)).font(.system(size: 14, weight: .semibold))
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                            }
+                            
+                            Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
+                            
+                            Button(action: {}) {
+                                HStack {
+                                    Image(systemName: "slider.horizontal.3")
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .frame(width: 24)
+                                    Text("İçeriği yönet")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.white)
+                                        .padding(.left, 4)
+                                    Spacer()
+                                    Text("PRO")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.blue)
+                                        .cornerRadius(4)
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                            }
+                            
+                            Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
+                            
+                            Button(action: {}) {
+                                HStack {
+                                    Image(systemName: "server.rack")
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .frame(width: 24)
+                                    Text("Meta veriler")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.white)
+                                        .padding(.left, 4)
+                                    Spacer()
+                                    Text("TMDB önce")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.white.opacity(0.5))
+                                    Image(systemName: "chevron.up.chevron.down").foregroundColor(.white.opacity(0.4)).font(.system(size: 12))
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                            }
+                            
+                            Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
+                            
+                            Button(action: {}) {
+                                HStack {
+                                    Image(systemName: "book.pages")
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .frame(width: 24)
+                                    Text("EPG'yi yönet")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.white)
+                                        .padding(.left, 4)
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundColor(.white.opacity(0.4)).font(.system(size: 14, weight: .semibold))
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                            }
+                            
+                            Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
+                            
+                            Button(action: {
+                                if let idx = accounts.firstIndex(where: { $0.id == acc.id }) {
+                                    if activeAccountIdString == acc.id.uuidString {
+                                        activeAccountIdString = ""
+                                        channels = []
+                                    }
+                                    accounts.remove(at: idx)
+                                    saveAccounts()
+                                    providerSheetState = 0
+                                }
+                            }) {
+                                HStack {
+                                    Image(systemName: "trash")
+                                        .foregroundColor(.red)
+                                        .frame(width: 24)
+                                    Text("Sil")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.red)
+                                        .padding(.left, 4)
+                                    Spacer()
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                            }
+                        }
+                        .background(Color(hex: "1C1C1E"))
+                        .cornerRadius(12)
+                        .padding(.horizontal, 20)
                     }
-                    .buttonStyle(PlainButtonStyle())
                 }
+                
+                Spacer().frame(height: 50)
             }
-            .padding(.top, 24)
-            .padding(.bottom, 60)
         }
     }
     
