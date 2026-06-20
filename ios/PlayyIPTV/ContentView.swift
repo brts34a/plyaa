@@ -944,44 +944,50 @@ struct ContentView: View {
                 }
                 
                 if libraryFilter == "Öne çıkanlar" {
-                    let movieGroupList = channels.filter { $0.contentType == "movie" }
-                    var featuredMovies = [Channel]()
-                    var seenF = Set<String>()
-                    for ch in movieGroupList {
-                        if !seenF.contains(ch.name) {
-                            seenF.insert(ch.name)
-                            featuredMovies.append(ch)
+                    let featuredMovies: [Channel] = {
+                        var list = [Channel]()
+                        var seen = Set<String>()
+                        for ch in channels.filter({ $0.contentType == "movie" }) {
+                            if !seen.contains(ch.name) {
+                                seen.insert(ch.name)
+                                list.append(ch)
+                            }
+                            if list.count >= 10 { break }
                         }
-                        if featuredMovies.count >= 10 { break }
-                    }
+                        return list
+                    }()
                     if !featuredMovies.isEmpty {
                         libraryHorizontalRankedSection(title: "Öne çıkan filmler", items: featuredMovies)
                     }
                     
-                    let seriesGroupList = channels.filter { $0.contentType == "series" }
-                    var featuredSeries = [Channel]()
-                    var seenS = Set<String>()
-                    for ch in seriesGroupList {
-                        if !seenS.contains(ch.name) {
-                            seenS.insert(ch.name)
-                            featuredSeries.append(ch)
+                    let featuredSeries: [Channel] = {
+                        var list = [Channel]()
+                        var seen = Set<String>()
+                        for ch in channels.filter({ $0.contentType == "series" }) {
+                            if !seen.contains(ch.name) {
+                                seen.insert(ch.name)
+                                list.append(ch)
+                            }
+                            if list.count >= 10 { break }
                         }
-                        if featuredSeries.count >= 10 { break }
-                    }
+                        return list
+                    }()
                     if !featuredSeries.isEmpty {
                         libraryHorizontalRankedSection(title: "Öne çıkan diziler", items: featuredSeries)
                     }
                     
-                    let allRecentMovies = Array(channels.filter { $0.contentType == "movie" }.reversed())
-                    var recentMovies = [Channel]()
-                    var seenNames = Set<String>()
-                    for ch in allRecentMovies {
-                        if !seenNames.contains(ch.name) {
-                            seenNames.insert(ch.name)
-                            recentMovies.append(ch)
+                    let recentMovies: [Channel] = {
+                        var list = [Channel]()
+                        var seen = Set<String>()
+                        for ch in channels.filter({ $0.contentType == "movie" }).reversed() {
+                            if !seen.contains(ch.name) {
+                                seen.insert(ch.name)
+                                list.append(ch)
+                            }
+                            if list.count >= 15 { break }
                         }
-                        if recentMovies.count >= 15 { break }
-                    }
+                        return list
+                    }()
                     
                     if !recentMovies.isEmpty {
                         libraryHorizontalPortraitSection(title: "Son eklenen filmler", items: recentMovies)
