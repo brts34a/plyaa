@@ -464,6 +464,7 @@ struct ContentView: View {
     @State private var sheetIsLoading: Bool = false
     @State private var sheetLoadingMessage: String = ""
     @State private var sheetError: String? = nil
+    @State private var cacheClearedMessage: String? = nil
     
     // MARK: - App Tab Selection
     enum AppTab { case home, live, library, search, settings }
@@ -1582,8 +1583,8 @@ struct ContentView: View {
             HStack(spacing: 0) {
                 tabItem(title: "Ana sayfa", icon: "house.fill", tab: .home)
                 tabItem(title: "Canlı TV", icon: "antenna.radiowaves.left.and.right", tab: .live)
-                // Using stack icon based on the screenshot
                 tabItem(title: "Kütüphane", icon: "square.stack.3d.up.fill", tab: .library)
+                tabItem(title: "Ayarlar", icon: "gearshape.fill", tab: .settings)
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 6)
@@ -1592,7 +1593,7 @@ struct ContentView: View {
             // Search Circle
             tabItem(title: "Ara", icon: "magnifyingglass", tab: .search, isCircle: true)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 16)
         .padding(.bottom, 24)
     }
 
@@ -1628,27 +1629,27 @@ struct ContentView: View {
                 Image(systemName: icon)
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundColor(.white)
-                    .frame(width: 60, height: 60)
+                    .frame(width: 58, height: 58)
                     .sexyGlassCircle()
             } else {
                 VStack(spacing: 4) {
                     Image(systemName: icon)
-                        .font(.system(size: 22, weight: currentTab == tab ? .bold : .medium))
-                        .foregroundColor(currentTab == tab ? (tab == .library ? Color(hex: "4FA5FF") : .white) : .white.opacity(0.6))
+                        .font(.system(size: 20, weight: currentTab == tab ? .bold : .medium))
+                        .foregroundColor(currentTab == tab ? .white : .white.opacity(0.6))
                     
                     Text(title)
-                        .font(.system(size: 11, weight: currentTab == tab ? .bold : .medium))
-                        .foregroundColor(currentTab == tab ? (tab == .library ? Color(hex: "4FA5FF") : .white) : .white.opacity(0.6))
+                        .font(.system(size: 10, weight: currentTab == tab ? .bold : .medium))
+                        .foregroundColor(currentTab == tab ? .white : .white.opacity(0.6))
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
                 }
-                .frame(width: 85)
-                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
                 .background(
                     Group {
                         if currentTab == tab {
                             RoundedRectangle(cornerRadius: 24)
-                                .fill(Color.white.opacity(0.15))
+                                .fill(Color.white.opacity(0.2))
                                 .matchedGeometryEffect(id: "navGlass", in: glassAnimation)
                         } else {
                             Color.clear
@@ -2147,17 +2148,131 @@ struct ContentView: View {
     }
     
     func emptyView() -> some View {
-        VStack {
-            Spacer()
-            VStack(spacing: 8) {
-                Image(systemName: "shippingbox")
-                    .font(.system(size: 32))
-                    .foregroundColor(.white.opacity(0.3))
-                Text("Listeleriniz boş. Lütfen Ayarlar sekmesinden hesap ekleyin.")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white.opacity(0.4))
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 28) {
+                Spacer().frame(height: 50)
+                
+                // Welcome / Logo Area
+                VStack(spacing: 16) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(colors: [Color(hex: "6D28D9"), Color(hex: "007FFF")], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 80, height: 80)
+                            .blur(radius: 12)
+                            .opacity(0.6)
+                        
+                        Image(systemName: "play.tv.fill")
+                            .font(.system(size: 38, weight: .bold))
+                            .foregroundStyle(
+                                LinearGradient(colors: [.white, .white.opacity(0.8)], startPoint: .top, endPoint: .bottom)
+                            )
+                    }
+                    
+                    VStack(spacing: 6) {
+                        Text("Playy IPTV'ye Hoş Geldiniz")
+                            .font(.system(size: 26, weight: .bold))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                        
+                        Text("Lütfen başlamak için bir yayın kaynağı ekleyin.")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.6))
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .padding(.horizontal, 24)
+                
+                // Quick Launch Glass Cards
+                VStack(spacing: 16) {
+                    // Option 1: M3U Playlist
+                    Button(action: {
+                        providerSheetState = 1
+                        currentTab = .settings
+                    }) {
+                        HStack(spacing: 16) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.blue.opacity(0.15))
+                                    .frame(width: 48, height: 48)
+                                    
+                                Image(systemName: "doc.text.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.blue)
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("M3U Playlist Bağlantısı")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                                Text("URL adresi girerek listenizi hızlıca yükleyin")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.white.opacity(0.5))
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.3))
+                        }
+                        .padding(16)
+                        .sexyGlass(cornerRadius: 20)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Option 2: Xtream Codes
+                    Button(action: {
+                        providerSheetState = 2
+                        currentTab = .settings
+                    }) {
+                        HStack(spacing: 16) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color(hex: "E0218A").opacity(0.15))
+                                    .frame(width: 48, height: 48)
+                                    
+                                Image(systemName: "list.dash.header.rectangle")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(Color(hex: "E0218A"))
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Xtream Codes Hesabı")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                                Text("Kullanıcı adı ve şifre ile giriş yapın")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.white.opacity(0.5))
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.3))
+                        }
+                        .padding(16)
+                        .sexyGlass(cornerRadius: 20)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(.horizontal, 20)
+                
+                // Active status section / Quick Info
+                HStack(spacing: 12) {
+                    Image(systemName: "shield.share")
+                        .foregroundColor(.white.opacity(0.4))
+                        .font(.system(size: 14))
+                    Text("Tüm bilgileriniz cihazınızda tamamen şifreli bir şekilde saklanır.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.4))
+                        .lineLimit(2)
+                }
+                .padding(.horizontal, 32)
+                .padding(.top, 10)
+                
+                Spacer().frame(height: 120) // Keep standard bottom padding to avoid tabbar overlaps
             }
-            Spacer()
         }
     }
     
@@ -2709,12 +2824,34 @@ struct ContentView: View {
             }
             
             DispatchQueue.main.async {
-                self.loadStep3 = true
-                self.loadStep4 = true
-                self.loadStep5 = true
-                self.loadStepFinished = true
                 self.channels = loaded
-                // Keep spinning or waiting for the user to press Bitti
+                // Step 2 is set to true during parse. Now, sequentially tick Steps 3, 4, 5.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    withAnimation {
+                        self.loadStep3 = true
+                        self.loadingMessage = "Filmler eşitleniyor..."
+                    }
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        withAnimation {
+                            self.loadStep4 = true
+                            self.loadingMessage = "Diziler eşitleniyor..."
+                        }
+                        
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                            withAnimation {
+                                self.loadStep5 = true
+                                self.loadingMessage = "İçerik eşleştiriliyor..."
+                            }
+                            
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                withAnimation {
+                                    self.loadStepFinished = true
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -2816,13 +2953,13 @@ struct ContentView: View {
         
         isLoading = true
         showAccountsSheet = false
-        loadStep1 = true // Connected
+        loadStep1 = false
         loadStep2 = false
         loadStep3 = false
         loadStep4 = false
         loadStep5 = false
         loadStepFinished = false
-        loadingMessage = "Filmler eşitleniyor..."
+        loadingMessage = "Sunucuya bağlanılıyor..."
         sheetError = nil
         
         let dispatchGroup = DispatchGroup()
@@ -2870,7 +3007,11 @@ struct ContentView: View {
         }.resume()
         
         dispatchGroup.notify(queue: .global(qos: .userInitiated)) {
-            DispatchQueue.main.async { self.loadStep2 = true; self.loadingMessage = "Canlı kanallar eşitleniyor..." }
+            DispatchQueue.main.async {
+                self.loadStep1 = true
+                self.loadStep2 = false
+                self.loadingMessage = "Canlı kanallar eşitleniyor..."
+            }
             
             let streamGroup = DispatchGroup()
             
@@ -2899,7 +3040,11 @@ struct ContentView: View {
             streamGroup.enter()
             URLSession.shared.dataTask(with: vodStreamsUrl) { data, _, _ in
                 defer { streamGroup.leave() }
-                DispatchQueue.main.async { self.loadStep3 = true; self.loadingMessage = "Diziler eşitleniyor..." }
+                DispatchQueue.main.async {
+                    self.loadStep2 = true
+                    self.loadStep3 = false
+                    self.loadingMessage = "Filmler eşitleniyor..."
+                }
                 struct XtreamMovie: Codable {
                     let name: String?
                     let stream_name: String?
@@ -2927,8 +3072,14 @@ struct ContentView: View {
             // 6. Fetch Series streams
             streamGroup.enter()
             URLSession.shared.dataTask(with: seriesStreamsUrl) { data, _, _ in
-                defer { streamGroup.leave() }
-                DispatchQueue.main.async { self.loadStep4 = true; self.loadingMessage = "İçerik eşleştiriliyor..." }
+                defer {
+                    DispatchQueue.main.async {
+                        self.loadStep4 = true
+                        self.loadStep5 = false
+                        self.loadingMessage = "İçerik eşleştiriliyor..."
+                    }
+                    streamGroup.leave()
+                }
                 struct XtreamSeries: Codable {
                     let name: String?
                     let stream_name: String?
@@ -2959,8 +3110,6 @@ struct ContentView: View {
                     self.showAccountsSheet = true
                     self.sheetError = internalError ?? "Girilen bilgilerle aktif bir yayın listesine ulaşılamadı. Lütfen sunucu durumunu veya bilgilerinizi kontrol edin."
                 } else {
-                    self.loadStep5 = true
-                    self.loadStepFinished = true
                     self.channels = fetchedChannels
                     self.xtreamHost = cleanHost
                     self.xtreamUser = user
@@ -2986,7 +3135,16 @@ struct ContentView: View {
                         try? encoded.write(to: self.getXtreamFilePath())
                     }
                     
-                    // Keep loading view visible until user hits Bitti
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        withAnimation {
+                            self.loadStep5 = true
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            withAnimation {
+                                self.loadStepFinished = true
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3000,8 +3158,23 @@ struct ContentView: View {
     // MARK: - Premium Dion Accounts Drawer Sheet
     var accountsDrawerSheet: some View {
         ZStack {
-            Color(hex: "101116").ignoresSafeArea()
+            Color(hex: "08090C").ignoresSafeArea()
             
+            // Premium Blurry Neon Fluid Backgrounds
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [Color(hex: "6D28D9"), Color(hex: "007FFF")], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 300, height: 300)
+                    .offset(x: 100, y: -150)
+                Circle()
+                    .fill(LinearGradient(colors: [Color(hex: "FF007F"), Color(hex: "7B2CBF")], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 320, height: 320)
+                    .offset(x: -120, y: 120)
+            }
+            .blur(radius: 80)
+            .opacity(0.12)
+            .ignoresSafeArea()
+
             if providerSheetState == 0 {
                 providersMainList
             } else if providerSheetState == 1 {
@@ -3011,57 +3184,87 @@ struct ContentView: View {
             } else if providerSheetState == 3 {
                 accountDetailView
             }
+
+            if let msg = cacheClearedMessage {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 12) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.green)
+                        Text(msg)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 14)
+                    .sexyGlass()
+                    .padding(.bottom, 150)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(99)
+            }
         }
     }
     
-        // MARK: - Providers Main List
+    // MARK: - Providers Main List
     var providersMainList: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 20) {
-                Text("Ayarlar")
+                Text("Sağlayıcılar")
                     .font(.system(size: 32, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
-                    .padding(.top, 20)
+                    .padding(.top, 24)
                 
-                // Active or Loaded Accounts
+                // Active or Loaded Accounts (IPTV profiles)
                 if !accounts.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Hesaplarınız")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.white.opacity(0.6))
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("SAĞLAYICILARINIZ")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.white.opacity(0.4))
                             .padding(.horizontal, 20)
                         
                         VStack(spacing: 0) {
                             ForEach(0..<accounts.count, id: \.self) { index in
                                 let acc = accounts[index]
                                 Button(action: {
-                                    if activeAccountIdString == acc.id.uuidString {
-                                        selectedDetailAccount = acc
-                                        providerSheetState = 3
-                                    } else {
-                                        switchAccount(to: acc)
-                                        providerSheetState = 0
-                                    }
+                                    switchAccount(to: acc)
+                                    selectedDetailAccount = acc
+                                    providerSheetState = 3
                                 }) {
                                     HStack {
-                                        Image(systemName: acc.mode == 0 ? "list.bullet.rectangle.portrait" : "server.rack")
-                                            .foregroundColor(.white)
-                                            .frame(width: 32, height: 32)
-                                            .background(acc.mode == 0 ? Color.blue : Color(hex: "E0218A"))
-                                            .cornerRadius(6)
+                                        ZStack {
+                                            LinearGradient(colors: [Color(hex: "6D28D9"), Color(hex: "007FFF")], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                                .frame(width: 32, height: 32)
+                                                .cornerRadius(8)
+                                            
+                                            Image(systemName: acc.mode == 0 ? "doc.richtext" : "server.rack")
+                                                .foregroundColor(.white)
+                                                .font(.system(size: 14, weight: .semibold))
+                                        }
                                         
-                                        Text(acc.name)
-                                            .font(.system(size: 16))
-                                            .foregroundColor(.white)
-                                            .padding(.leading, 8)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(acc.name)
+                                                .font(.system(size: 16, weight: .semibold))
+                                                .foregroundColor(.white)
+                                            Text(acc.mode == 0 ? "M3U Playlist kütüphanesi" : "Xtream Canlı & Sinema")
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.white.opacity(0.5))
+                                        }
+                                        .padding(.leading, 8)
                                         
                                         Spacer()
                                         
                                         if activeAccountIdString == acc.id.uuidString {
-                                            Image(systemName: "checkmark")
+                                            Text("AKTİF")
+                                                .font(.system(size: 10, weight: .bold))
                                                 .foregroundColor(.green)
-                                                .padding(.trailing, 8)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(Color.green.opacity(0.15))
+                                                .cornerRadius(4)
+                                                .padding(.trailing, 4)
                                         }
                                         
                                         Image(systemName: "chevron.right")
@@ -3071,59 +3274,330 @@ struct ContentView: View {
                                     .padding(.vertical, 12)
                                     .padding(.horizontal, 16)
                                 }
-                                if index < accounts.count - 1 { Divider().background(Color.white.opacity(0.1)).padding(.leading, 56) }
-                            }
+                                if index < accounts.count - 1 {
+                                    Divider().background(Color.white.opacity(0.1)).padding(.leading, 56)
+                                }
+                             }
                         }
-                        .background(Color(hex: "1C1C1E"))
-                        .cornerRadius(12)
+                        .sexyGlass(cornerRadius: 16)
                         .padding(.horizontal, 20)
                     }
                 }
                 
-                // Existing items ...
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("IPTV")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.white.opacity(0.6))
+                // Ağınızda Mevcut (Local Network Search) section
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Ağınızda mevcut")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
                         .padding(.horizontal, 20)
                     
                     VStack(spacing: 0) {
-                        Button(action: { providerSheetState = 1 }) {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.6)))
+                                .scaleEffect(0.9)
+                            
+                            Text("Yerel ağ aranıyor...")
+                                .font(.system(size: 15))
+                                .foregroundColor(.white.opacity(0.6))
+                            
+                            Spacer()
+                        }
+                        .padding(.vertical, 14)
+                        .padding(.horizontal, 16)
+                    }
+                    .sexyGlass(cornerRadius: 16)
+                    .padding(.horizontal, 20)
+                }
+                
+                // IPTV Providers section
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("IPTV")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
+                        .padding(.horizontal, 20)
+                    
+                    VStack(spacing: 0) {
+                        // M3U Provider button
+                        Button(action: {
+                            providerSheetState = 1
+                        }) {
                             HStack {
-                                Image(systemName: "doc.text.fill")
+                                ZStack {
+                                    Color.blue
+                                        .frame(width: 32, height: 32)
+                                        .cornerRadius(8)
+                                    
+                                    Image(systemName: "doc.text.fill")
+                                        .foregroundColor(.white)
+                                        .font(.system(size: 15))
+                                }
+                                
+                                Text("M3U")
+                                    .font(.system(size: 16, weight: .medium))
                                     .foregroundColor(.white)
-                                    .frame(width: 28, height: 28)
-                                    .background(Color.blue)
-                                    .cornerRadius(6)
-                                Text("M3U").font(.system(size: 16)).foregroundColor(.white).padding(.leading, 8)
+                                    .padding(.leading, 8)
+                                
                                 Spacer()
-                                Image(systemName: "chevron.right").foregroundColor(.white.opacity(0.4)).font(.system(size: 14, weight: .semibold))
+                                
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(.white.opacity(0.4))
+                                    .font(.system(size: 14, weight: .semibold))
                             }
                             .padding(.vertical, 12)
                             .padding(.horizontal, 16)
                         }
+                        
                         Divider().background(Color.white.opacity(0.1)).padding(.leading, 56)
-                        Button(action: { providerSheetState = 2 }) {
+                        
+                        // Xtream Codes button
+                        Button(action: {
+                            providerSheetState = 2
+                        }) {
                             HStack {
-                                Image(systemName: "list.dash.header.rectangle")
+                                ZStack {
+                                    Color(hex: "E0218A")
+                                        .frame(width: 32, height: 32)
+                                        .cornerRadius(8)
+                                    
+                                    Image(systemName: "server.rack")
+                                        .foregroundColor(.white)
+                                        .font(.system(size: 15))
+                                }
+                                
+                                Text("Xtream")
+                                    .font(.system(size: 16, weight: .medium))
                                     .foregroundColor(.white)
-                                    .frame(width: 28, height: 28)
-                                    .background(Color(hex: "E0218A"))
-                                    .cornerRadius(6)
-                                Text("Xtream").font(.system(size: 16)).foregroundColor(.white).padding(.leading, 8)
+                                    .padding(.leading, 8)
+                                
                                 Spacer()
-                                Image(systemName: "chevron.right").foregroundColor(.white.opacity(0.4)).font(.system(size: 14, weight: .semibold))
+                                
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(.white.opacity(0.4))
+                                    .font(.system(size: 14, weight: .semibold))
                             }
                             .padding(.vertical, 12)
                             .padding(.horizontal, 16)
                         }
                     }
-                    .background(Color(hex: "1C1C1E"))
-                    .cornerRadius(12)
+                    .sexyGlass(cornerRadius: 16)
                     .padding(.horizontal, 20)
                 }
                 
-                Spacer().frame(height: 120)
+                // Medya merkezleri section
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Medya merkezleri")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
+                        .padding(.horizontal, 20)
+                    
+                    VStack(spacing: 0) {
+                        // Plex row
+                        Button(action: {
+                            // Show premium feedback alert
+                        }) {
+                            HStack {
+                                ZStack {
+                                    Color(hex: "E5A93B")
+                                        .frame(width: 32, height: 32)
+                                        .cornerRadius(8)
+                                    
+                                    Image(systemName: "play.tv.fill")
+                                        .foregroundColor(.black)
+                                        .font(.system(size: 15))
+                                }
+                                
+                                Text("Plex")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 8)
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(.white.opacity(0.4))
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                        }
+                        
+                        Divider().background(Color.white.opacity(0.1)).padding(.leading, 56)
+                        
+                        // Jellyfin row
+                        Button(action: {
+                            // Show premium feedback alert
+                        }) {
+                            HStack {
+                                ZStack {
+                                    Color(hex: "10A5F5")
+                                        .frame(width: 32, height: 32)
+                                        .cornerRadius(8)
+                                    
+                                    Image(systemName: "circle.grid.cross.fill")
+                                        .foregroundColor(.white)
+                                        .font(.system(size: 15))
+                                }
+                                
+                                Text("Jellyfin")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 8)
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(.white.opacity(0.4))
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                        }
+                    }
+                    .sexyGlass(cornerRadius: 16)
+                    .padding(.horizontal, 20)
+                }
+                
+                // Dosya depolama section
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Dosya depolama")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
+                        .padding(.horizontal, 20)
+                    
+                    VStack(spacing: 0) {
+                        // WebDAV row
+                        Button(action: {
+                            // Show premium feedback alert
+                        }) {
+                            HStack {
+                                ZStack {
+                                    Color(hex: "34D399")
+                                        .frame(width: 32, height: 32)
+                                        .cornerRadius(8)
+                                    
+                                    Image(systemName: "folder.badge.gearshape")
+                                        .foregroundColor(.white)
+                                        .font(.system(size: 15))
+                                }
+                                
+                                Text("WebDAV")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 8)
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(.white.opacity(0.4))
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                        }
+                        
+                        Divider().background(Color.white.opacity(0.1)).padding(.leading, 56)
+                        
+                        // SMB row
+                        Button(action: {
+                            // Show premium feedback alert
+                        }) {
+                            HStack {
+                                ZStack {
+                                    Color(hex: "FBBF24")
+                                        .frame(width: 32, height: 32)
+                                        .cornerRadius(8)
+                                    
+                                    Image(systemName: "server.rack")
+                                        .foregroundColor(.white)
+                                        .font(.system(size: 15))
+                                }
+                                
+                                Text("SMB")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 8)
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(.white.opacity(0.4))
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                        }
+                    }
+                    .sexyGlass(cornerRadius: 16)
+                    .padding(.horizontal, 20)
+                }
+                
+                // Diğer Ayarlar List (Clear Cache & Version)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("SİSTEM SEÇENEKLERİ")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
+                        .padding(.horizontal, 20)
+                    
+                    VStack(spacing: 0) {
+                        Button(action: {
+                            // Clear states
+                            self.channels = []
+                            self.favourites = []
+                            UserDefaults.standard.removeObject(forKey: "favourites")
+                            withAnimation {
+                                cacheClearedMessage = "Önbellek ve Favoriler Temizlendi!"
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                withAnimation {
+                                    cacheClearedMessage = nil
+                                }
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: "trash.fill")
+                                    .foregroundColor(.white)
+                                    .frame(width: 28, height: 28)
+                                    .background(Color.red)
+                                    .cornerRadius(6)
+                                Text("Önbelleği Temizle")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white)
+                                    .padding(.leading, 8)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(.white.opacity(0.4))
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                        }
+                        
+                        Divider().background(Color.white.opacity(0.1)).padding(.leading, 56)
+                        
+                        HStack {
+                            Image(systemName: "info.circle.fill")
+                                .foregroundColor(.white)
+                                .frame(width: 28, height: 28)
+                                .background(Color.secondary)
+                                .cornerRadius(6)
+                            Text("Versiyon")
+                                .font(.system(size: 16))
+                                .foregroundColor(.white)
+                                .padding(.leading, 8)
+                            Spacer()
+                            Text("v1.5.0 Premium")
+                                .font(.system(size: 14))
+                                .foregroundColor(.white.opacity(0.6))
+                        }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                    }
+                    .sexyGlass(cornerRadius: 16)
+                    .padding(.horizontal, 20)
+                }
+                
+                Spacer().frame(height: 150)
             }
         }
     }
@@ -3403,8 +3877,7 @@ struct ContentView: View {
                             .padding(.vertical, 12)
                             .padding(.horizontal, 16)
                         }
-                        .background(Color(hex: "1C1C1E"))
-                        .cornerRadius(12)
+                        .sexyGlass(cornerRadius: 16)
                         .padding(.horizontal, 20)
                     }
                     
@@ -3545,8 +4018,7 @@ struct ContentView: View {
                                 .padding(.horizontal, 16)
                             }
                         }
-                        .background(Color(hex: "1C1C1E"))
-                        .cornerRadius(12)
+                        .sexyGlass(cornerRadius: 16)
                         .padding(.horizontal, 20)
                     }
                 }
@@ -3875,45 +4347,45 @@ extension View {
     func sexyGlass(cornerRadius: CGFloat = 20) -> some View {
         self.background(
             ZStack {
-                VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialLight))
-                Color.black.opacity(0.15)
+                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+                Color.black.opacity(0.2)
             }
         )
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius)
                 .stroke(
                     LinearGradient(
-                        gradient: Gradient(colors: [Color.white.opacity(0.6), Color.white.opacity(0.1)]),
+                        gradient: Gradient(colors: [Color.white.opacity(0.18), Color.white.opacity(0.04)]),
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: 1.5
+                    lineWidth: 1.2
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        .shadow(color: .black.opacity(0.6), radius: 25, x: 0, y: 20)
+        .shadow(color: Color.black.opacity(0.5), radius: 15, x: 0, y: 10)
     }
     
     func sexyGlassCircle() -> some View {
         self.background(
             ZStack {
-                VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialLight))
-                Color.black.opacity(0.15)
+                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+                Color.black.opacity(0.2)
             }
         )
         .overlay(
             Circle()
                 .stroke(
                     LinearGradient(
-                        gradient: Gradient(colors: [Color.white.opacity(0.6), Color.white.opacity(0.1)]),
+                        gradient: Gradient(colors: [Color.white.opacity(0.18), Color.white.opacity(0.04)]),
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: 1.5
+                    lineWidth: 1.2
                 )
         )
         .clipShape(Circle())
-        .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 15)
+        .shadow(color: Color.black.opacity(0.4), radius: 12, x: 0, y: 8)
     }
 }
 
