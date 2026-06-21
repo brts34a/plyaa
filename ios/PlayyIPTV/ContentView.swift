@@ -314,7 +314,49 @@ struct NativeVideoPlayerView: UIViewControllerRepresentable {
             uiViewController.player?.replaceCurrentItem(with: nil)
             uiViewController.player = nil
             
-            let optimizedUrlString = normalized
+            // Magic Trick for IPTV Optimization: Smartly convert any Xtream Codes TS/Live link to HLS (.m3u8) for native AVPlayer
+            var optimizedUrlString = normalized
+            if let urlObj = URL(string: normalized) {
+                let pathParts = urlObj.path.split(separator: "/").map(String.init).filter { !$0.isEmpty }
+                
+                var isLiveXtream = false
+                var user = ""
+                var pass = ""
+                var id = ""
+                
+                if pathParts.count == 3 {
+                    user = pathParts[0]
+                    pass = pathParts[1]
+                    id = pathParts[2]
+                    isLiveXtream = true
+                } else if pathParts.count == 4 && pathParts[0].lowercased() == "live" {
+                    user = pathParts[1]
+                    pass = pathParts[2]
+                    id = pathParts[3]
+                    isLiveXtream = true
+                }
+                
+                if isLiveXtream {
+                    let idLower = id.lowercased()
+                    // Don't modify if it's already an explicit VOD extension
+                    if !idLower.hasSuffix(".mp4") && !idLower.hasSuffix(".mkv") && !idLower.hasSuffix(".avi") && !idLower.hasSuffix(".m3u8") {
+                        if let dotIndex = id.lastIndex(of: ".") {
+                            id = String(id[..<dotIndex])
+                        }
+                        
+                        if var components = URLComponents(string: normalized) {
+                            components.path = "/live/\(user)/\(pass)/\(id).m3u8"
+                            if let newUrl = components.url?.absoluteString {
+                                optimizedUrlString = newUrl
+                            }
+                        }
+                    }
+                } else {
+                    if optimizedUrlString.lowercased().hasSuffix(".ts") {
+                        optimizedUrlString = String(optimizedUrlString.dropLast(3)) + ".m3u8"
+                    }
+                }
+            }
             
             if let url = URL(string: optimizedUrlString) {
                 try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
@@ -328,8 +370,8 @@ struct NativeVideoPlayerView: UIViewControllerRepresentable {
                 let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
                 let playerItem = AVPlayerItem(asset: asset)
                 
-                // 1.0 saniye önbellek ile donmaları sıfıra indirirken neredeyse anında açılmasını sağlama
-                playerItem.preferredForwardBufferDuration = 1.0
+                // 1.5 saniye önbellek ile donmaları sıfıra indirirken neredeyse anında açılmasını sağlama
+                playerItem.preferredForwardBufferDuration = 1.5
                 
                 let player = AVPlayer(playerItem: playerItem)
                 player.automaticallyWaitsToMinimizeStalling = true
@@ -468,12 +510,19 @@ struct ContentView: View {
     @State private var controlsTimer: Timer? = nil
     @State private var brightnessLevel: CGFloat = UIScreen.main.brightness
     @State private var volumeLevel: CGFloat = 0.5
+    @State private var dragStartBrightness: CGFloat = 0.5
+    @State private var dragStartVolume: CGFloat = 0.5
     
     var body: some View {
         GeometryReader { geo in
             let _ = geo.size.width > geo.size.height
             ZStack {
                 Color(hex: "08090C").ignoresSafeArea()
+                
+                // Active Volume Sync with physical buttons / system levels
+                VolumeSliderRepresentable(volume: $volumeLevel)
+                    .frame(width: 1, height: 1)
+                    .opacity(0.001)
                 
                 // Premium Blurry Neon Fluid Backgrounds
                 ZStack {
@@ -545,6 +594,8 @@ struct ContentView: View {
             configureAudioSession()
             loadFavourites()
             loadSavedData()
+            brightnessLevel = UIScreen.main.brightness
+            volumeLevel = CGFloat(AVAudioSession.sharedInstance().outputVolume)
         }
         .overlay(
             Group {
@@ -1296,7 +1347,20 @@ struct ContentView: View {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 16) {
                     let filteredItems = channels.filter { $0.contentType != "live" && $0.safeGroup == category && (librarySearchQuery.isEmpty || $0.name.localizedCaseInsensitiveContains(librarySearchQuery)) }
                     
-                    ForEach(filteredItems, id: \.id) { channel in
+                    let uniqueFilteredItems: [Channel] = {
+                        var seenMovieNames = Set<String>()
+                        return filteredItems.filter { item in
+                            let cleared = cleanTitle(item.name)
+                            if seenMovieNames.contains(cleared) {
+                                return false
+                            } else {
+                                seenMovieNames.insert(cleared)
+                                return true
+                            }
+                        }
+                    }()
+                    
+                    ForEach(uniqueFilteredItems, id: \.id) { channel in
                         Button(action: { selectedChannel = channel }) {
                             VStack(alignment: .leading, spacing: 8) {
                                 ZStack {
@@ -1476,21 +1540,29 @@ struct ContentView: View {
              
              ScrollView(.horizontal, showsIndicators: false) {
                  HStack(spacing: 12) {
-                     let items = Array(channels.filter { $0.contentType == type || type == "all" }.prefix(15))
+                     let items = getUniqueChannels(type: type, limit: 15, reversed: type == "series")
                      ForEach(items) { channel in
                          Button(action: { selectedChannel = channel }) {
-                             ZStack {
-                                 RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.05))
-                                 if let url = URL(string: channel.logo) {
-                                     AsyncImage(url: url) { p in
-                                         if let i = p.image { i.resizable().scaledToFill().frame(width: 120, height: 180).clipShape(RoundedRectangle(cornerRadius: 12)) }
-                                         else { Image(systemName: "film").foregroundColor(.white.opacity(0.3)) }
+                             VStack(alignment: .leading, spacing: 8) {
+                                 ZStack {
+                                     RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.05))
+                                     if let url = URL(string: channel.logo) {
+                                         AsyncImage(url: url) { p in
+                                             if let i = p.image { i.resizable().scaledToFill().frame(width: 120, height: 180).clipShape(RoundedRectangle(cornerRadius: 12)) }
+                                             else { Image(systemName: "film").foregroundColor(.white.opacity(0.3)) }
+                                         }
+                                     } else {
+                                         Image(systemName: "film").foregroundColor(.white.opacity(0.3))
                                      }
-                                 } else {
-                                     Image(systemName: "film").foregroundColor(.white.opacity(0.3))
                                  }
+                                 .frame(width: 120, height: 180)
+                                 
+                                 Text(channel.name)
+                                     .font(.system(size: 11, weight: .semibold))
+                                     .foregroundColor(.white.opacity(0.8))
+                                     .lineLimit(1)
+                                     .frame(width: 120, alignment: .leading)
                              }
-                             .frame(width: 120, height: 180)
                          }
                      }
                  }
@@ -1742,13 +1814,16 @@ struct ContentView: View {
                             .gesture(
                                 DragGesture(minimumDistance: 10)
                                     .onChanged { value in
+                                        if !showBrightnessPill {
+                                            dragStartBrightness = brightnessLevel
+                                        }
                                         withAnimation {
                                             showBrightnessPill = true
                                             showingControls = true
                                             resetTimer()
                                         }
-                                        let delta = value.translation.height / -400.0
-                                        brightnessLevel = max(0.0, min(1.0, brightnessLevel + delta))
+                                        let delta = value.translation.height / -250.0
+                                        brightnessLevel = max(0.0, min(1.0, dragStartBrightness + delta))
                                         UIScreen.main.brightness = brightnessLevel
                                     }
                                     .onEnded { _ in
@@ -1769,16 +1844,16 @@ struct ContentView: View {
                             .gesture(
                                 DragGesture(minimumDistance: 10)
                                     .onChanged { value in
+                                        if !showVolumePill {
+                                            dragStartVolume = volumeLevel
+                                        }
                                         withAnimation {
                                             showVolumePill = true
                                             showingControls = true
                                             resetTimer()
                                         }
-                                        let delta = value.translation.height / -400.0
-                                        let currentVol = Double(MPVolumeView.volumeSlider?.value ?? Float(volumeLevel))
-                                        let newVol = max(0.0, min(1.0, currentVol + Double(delta)))
-                                        MPVolumeView.volumeSlider?.value = Float(newVol)
-                                        volumeLevel = CGFloat(newVol)
+                                        let delta = value.translation.height / -250.0
+                                        volumeLevel = max(0.0, min(1.0, dragStartVolume + delta))
                                     }
                                     .onEnded { _ in
                                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
@@ -2300,6 +2375,8 @@ struct ContentView: View {
         .onAppear {
             showingControls = true
             resetTimer()
+            brightnessLevel = UIScreen.main.brightness
+            volumeLevel = CGFloat(AVAudioSession.sharedInstance().outputVolume)
         }
         .onDisappear {
             controlsTimer?.invalidate()
@@ -3134,21 +3211,13 @@ struct ContentView: View {
                     }
                     
                     let grpLower = currentGroup.lowercased()
-                    let nameLower = currentName.lowercased()
                     let contentType: String
                     
                     let isVideoFileSuf = clean.lowercased().hasSuffix(".mkv") || clean.lowercased().hasSuffix(".mp4") || clean.lowercased().hasSuffix(".avi") || clean.lowercased().hasSuffix(".mov") || clean.lowercased().hasSuffix(".m4v")
                     let isXtreamMoviePath = clean.lowercased().contains("/movie/") || clean.lowercased().contains("/movies/")
                     let isXtreamSeriesPath = clean.lowercased().contains("/series/")
                     
-                    let isLiveExtension = clean.lowercased().hasSuffix(".m3u8") || clean.lowercased().hasSuffix(".ts") || clean.lowercased().contains("/live/")
-                    
-                    let groupIsLive = grpLower.contains("canli") || grpLower.contains("canlı") || grpLower.contains("yayin") || grpLower.contains("yayın") || grpLower.contains("haber") || grpLower.contains("spor") || grpLower.contains("sport") || grpLower.contains("ulusal") || grpLower.contains("belgesel") || grpLower.contains("çocuk") || grpLower.contains("sinema tv") || grpLower.contains("sinematv")
-                    
-                    let groupIsMovie = grpLower.contains("film") || grpLower.contains("movie") || grpLower.contains("sinema") || grpLower.contains("vod") || grpLower.contains("cinema")
                     let groupIsSeries = grpLower.contains("dizi") || grpLower.contains("series") || grpLower.contains("sezon") || grpLower.contains("season")
-                    
-                    let nameIsMovie = nameLower.contains("film:") || nameLower.contains("sinema:")
                     
                     if isXtreamSeriesPath {
                         contentType = "series"
@@ -3160,12 +3229,6 @@ struct ContentView: View {
                         } else {
                             contentType = "movie"
                         }
-                    } else if isLiveExtension {
-                        contentType = "live"
-                    } else if groupIsSeries && !groupIsLive {
-                        contentType = "series"
-                    } else if (groupIsMovie || nameIsMovie) && !groupIsLive && !grpLower.contains("sinema tv") && !grpLower.contains("sinematv") {
-                        contentType = "movie"
                     } else {
                         contentType = "live"
                     }
@@ -3237,21 +3300,13 @@ struct ContentView: View {
                     
                     // Classify content types dynamically
                     let grpLower = currentGroup.lowercased()
-                    let nameLower = currentName.lowercased()
                     let contentType: String
                     
                     let isVideoFileSuf = clean.lowercased().hasSuffix(".mkv") || clean.lowercased().hasSuffix(".mp4") || clean.lowercased().hasSuffix(".avi") || clean.lowercased().hasSuffix(".mov") || clean.lowercased().hasSuffix(".m4v")
                     let isXtreamMoviePath = clean.lowercased().contains("/movie/") || clean.lowercased().contains("/movies/")
                     let isXtreamSeriesPath = clean.lowercased().contains("/series/")
                     
-                    let isLiveExtension = clean.lowercased().hasSuffix(".m3u8") || clean.lowercased().hasSuffix(".ts") || clean.lowercased().contains("/live/")
-                    
-                    let groupIsLive = grpLower.contains("canli") || grpLower.contains("canlı") || grpLower.contains("yayin") || grpLower.contains("yayın") || grpLower.contains("haber") || grpLower.contains("spor") || grpLower.contains("sport") || grpLower.contains("ulusal") || grpLower.contains("belgesel") || grpLower.contains("çocuk") || grpLower.contains("sinema tv") || grpLower.contains("sinematv")
-                    
-                    let groupIsMovie = grpLower.contains("film") || grpLower.contains("movie") || grpLower.contains("sinema") || grpLower.contains("vod") || grpLower.contains("cinema")
                     let groupIsSeries = grpLower.contains("dizi") || grpLower.contains("series") || grpLower.contains("sezon") || grpLower.contains("season")
-                    
-                    let nameIsMovie = nameLower.contains("film:") || nameLower.contains("sinema:")
                     
                     if isXtreamSeriesPath {
                         contentType = "series"
@@ -3263,12 +3318,6 @@ struct ContentView: View {
                         } else {
                             contentType = "movie"
                         }
-                    } else if isLiveExtension {
-                        contentType = "live"
-                    } else if groupIsSeries && !groupIsLive {
-                        contentType = "series"
-                    } else if (groupIsMovie || nameIsMovie) && !groupIsLive && !grpLower.contains("sinema tv") && !grpLower.contains("sinematv") {
-                        contentType = "movie"
                     } else {
                         contentType = "live"
                     }
@@ -4818,14 +4867,53 @@ extension Color {
 }
 
 struct VolumeSliderRepresentable: UIViewRepresentable {
+    @Binding var volume: CGFloat
+    
     func makeUIView(context: Context) -> MPVolumeView {
         let view = MPVolumeView()
         view.showsRouteButton = false
-        if let slider = view.subviews.compactMap({ $0 as? UISlider }).first {
+        view.alpha = 0.0001
+        
+        if let slider = view.subviews.first(where: { $0 is UISlider }) as? UISlider {
             slider.minimumTrackTintColor = .white
             slider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.3)
+            slider.addTarget(context.coordinator, action: #selector(Coordinator.volumeChanged(_:)), for: .valueChanged)
+            context.coordinator.slider = slider
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                if let slider = view.subviews.first(where: { $0 is UISlider }) as? UISlider {
+                    slider.addTarget(context.coordinator, action: #selector(Coordinator.volumeChanged(_:)), for: .valueChanged)
+                    context.coordinator.slider = slider
+                }
+            }
         }
         return view
     }
-    func updateUIView(_ uiView: MPVolumeView, context: Context) {}
+    
+    func updateUIView(_ uiView: MPVolumeView, context: Context) {
+        if let slider = uiView.subviews.first(where: { $0 is UISlider }) as? UISlider {
+            if abs(slider.value - Float(volume)) > 0.01 {
+                slider.setValue(Float(volume), animated: false)
+            }
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject {
+        var parent: VolumeSliderRepresentable
+        weak var slider: UISlider?
+        
+        init(_ parent: VolumeSliderRepresentable) {
+            self.parent = parent
+        }
+        
+        @objc func volumeChanged(_ sender: UISlider) {
+            DispatchQueue.main.async {
+                self.parent.volume = CGFloat(sender.value)
+            }
+        }
+    }
 }
