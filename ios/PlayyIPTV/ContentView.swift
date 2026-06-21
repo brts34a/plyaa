@@ -3946,6 +3946,7 @@ struct ContentView: View {
         }.resume() // series
         }.resume() // vod
     }.resume() // live
+    } // End dispatchGroup.notify
 }
 
 // MARK: - Legacy direct API fetch handler
