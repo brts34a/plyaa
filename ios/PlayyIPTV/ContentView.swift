@@ -173,6 +173,17 @@ class PlayerInfoManager: ObservableObject {
         }
     }
     
+    func stop() {
+        timer?.invalidate()
+        hideTimer?.invalidate()
+        player?.pause()
+        player = nil
+        DispatchQueue.main.async {
+            self.resolutionString = "Bağlanıyor..."
+            self.isPlaying = false
+        }
+    }
+    
     deinit {
         timer?.invalidate()
         hideTimer?.invalidate()
@@ -234,6 +245,7 @@ struct NativeVideoPlayerView: UIViewControllerRepresentable {
     let urlString: String
     let videoContentMode: UIView.ContentMode
     @ObservedObject var infoManager: PlayerInfoManager
+    var showsPlaybackControls: Bool = true
     
     class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var currentUrl: String = ""
@@ -259,7 +271,7 @@ struct NativeVideoPlayerView: UIViewControllerRepresentable {
     
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
-        controller.showsPlaybackControls = true
+        controller.showsPlaybackControls = showsPlaybackControls
         controller.videoGravity = videoContentMode == .scaleAspectFill ? .resizeAspectFill : .resizeAspect
         controller.allowsPictureInPicturePlayback = true
         controller.view.backgroundColor = .black
@@ -284,6 +296,7 @@ struct NativeVideoPlayerView: UIViewControllerRepresentable {
     }
     
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
+        uiViewController.showsPlaybackControls = showsPlaybackControls
         uiViewController.videoGravity = videoContentMode == .scaleAspectFill ? .resizeAspectFill : .resizeAspect
         
         let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -481,6 +494,8 @@ struct ContentView: View {
     enum AppTab { case home, live, library, search, settings }
     @State private var currentTab: AppTab = .home
     @State private var isLandscape: Bool = false
+    @State private var showLandscapeChannelList: Bool = false
+    @State private var landscapeSearchQuery: String = ""
     
     var body: some View {
         GeometryReader { geo in
@@ -503,13 +518,14 @@ struct ContentView: View {
                 .opacity(0.18)
                 .ignoresSafeArea()
                 
-                VStack(spacing: 0) {
-                    if let channel = selectedChannel {
-                        if isLandscape {
-                            landscapePlayerView
-                                .ignoresSafeArea()
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else {
+                if isLandscape, let _ = selectedChannel {
+                    landscapePlayerView
+                        .background(Color.black)
+                        .ignoresSafeArea()
+                        .zIndex(2000)
+                } else {
+                    VStack(spacing: 0) {
+                        if let channel = selectedChannel {
                             globalPortraitPlayerView
                                 .frame(height: geo.size.height * 0.35)
                             
@@ -538,15 +554,13 @@ struct ContentView: View {
                                 mainTabContent
                                     .frame(height: geo.size.height * 0.65)
                             }
+                        } else {
+                            mainTabContent
+                                .frame(height: geo.size.height)
                         }
-                    } else {
-                        mainTabContent
-                            .frame(height: geo.size.height)
+                        Spacer(minLength: 0)
                     }
-                    Spacer(minLength: 0)
-                }
-                
-                if !isLandscape {
+                    
                     VStack {
                         Spacer()
                         floatingTabBar
@@ -772,7 +786,7 @@ struct ContentView: View {
                                 .background(.ultraThinMaterial)
                                 .clipShape(Circle())
                         }
-                        Button(action: { selectedChannel = nil }) {
+                        Button(action: { closeSelectedChannel() }) {
                             Image(systemName: "xmark")
                                 .font(.system(size: 16, weight: .bold))
                                 .foregroundColor(.white)
@@ -1634,13 +1648,17 @@ struct ContentView: View {
 
     func getUniqueChannels(type: String, limit: Int, reversed: Bool) -> [Channel] {
         var list = [Channel]()
-        var seen = Set<String>()
+        var seenNames = Set<String>()
+        var seenUrls = Set<String>()
         let filtered = channels.filter { $0.contentType == type }
         let iterator = reversed ? AnySequence(filtered.reversed()) : AnySequence(filtered)
         
         for ch in iterator {
-            if !seen.contains(ch.name) {
-                seen.insert(ch.name)
+            let normalizedName = ch.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let normalizedUrl = ch.url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !seenNames.contains(normalizedName) && !seenUrls.contains(normalizedUrl) {
+                seenNames.insert(normalizedName)
+                seenUrls.insert(normalizedUrl)
                 list.append(ch)
             }
             if list.count >= limit { break }
@@ -1704,10 +1722,20 @@ struct ContentView: View {
     @State private var brightnessLevel: CGFloat = UIScreen.main.brightness
     @State private var volumeLevel: CGFloat = 0.5
 
-        var landscapePlayerView: some View {
+    var landscapeFilteredChannels: [Channel] {
+        let currentType = selectedChannel?.contentType ?? "live"
+        let list = channels.filter { $0.contentType == currentType }
+        if landscapeSearchQuery.isEmpty {
+            return list
+        } else {
+            return list.filter { $0.name.localizedCaseInsensitiveContains(landscapeSearchQuery) }
+        }
+    }
+
+    var landscapePlayerView: some View {
         ZStack {
             if let channel = selectedChannel {
-                NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo)
+                NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo, showsPlaybackControls: false)
                     .ignoresSafeArea()
                     .onTapGesture {
                         withAnimation { showingControls.toggle() }
@@ -1734,8 +1762,7 @@ struct ContentView: View {
                                 }
                                 
                                 Button(action: {
-                                    selectedChannel = nil
-                                    isLandscape = false
+                                    closeSelectedChannel()
                                 }) {
                                     Image(systemName: "xmark")
                                         .font(.system(size: 15, weight: .bold))
@@ -1860,12 +1887,14 @@ struct ContentView: View {
                                         .clipShape(Circle())
                                 }
                                 Button(action: {
-                                    // Show channels list
+                                    withAnimation {
+                                        showLandscapeChannelList.toggle()
+                                    }
                                     resetTimer()
                                 }) {
                                     Image(systemName: "list.bullet")
                                         .font(.system(size: 18, weight: .medium))
-                                        .foregroundColor(.white)
+                                        .foregroundColor(showLandscapeChannelList ? Color(hex: "007FFF") : .white)
                                         .frame(width: 44, height: 44)
                                         .background(Color.black.opacity(0.4))
                                         .clipShape(Circle())
@@ -1915,6 +1944,102 @@ struct ContentView: View {
                         .padding(.horizontal, 40)
                         .padding(.bottom, 40)
                     }
+                }
+                
+                // Sliding Sidebar Channel Drawer (Glassmorphic)
+                if showLandscapeChannelList {
+                    HStack(spacing: 0) {
+                        Spacer()
+                        
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack {
+                                Text("Kanallar")
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundColor(.white)
+                                Spacer()
+                                Button(action: {
+                                    withAnimation {
+                                        showLandscapeChannelList = false
+                                    }
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 22))
+                                        .foregroundColor(.white.opacity(0.5))
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 24)
+                            
+                            HStack {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundColor(.white.opacity(0.4))
+                                TextField("Ara...", text: $landscapeSearchQuery)
+                                    .textFieldStyle(PlainTextFieldStyle())
+                                    .foregroundColor(.white)
+                                    .font(.system(size: 14))
+                            }
+                            .padding(10)
+                            .background(Color.white.opacity(0.08))
+                            .cornerRadius(10)
+                            .padding(.horizontal, 16)
+                            
+                            ScrollView {
+                                LazyVStack(spacing: 8) {
+                                    ForEach(landscapeFilteredChannels.prefix(120), id: \.self) { ch in
+                                        Button(action: {
+                                            selectedChannel = ch
+                                            resetTimer()
+                                        }) {
+                                            HStack(spacing: 12) {
+                                                if !ch.logo.isEmpty, let url = URL(string: ch.logo) {
+                                                    AsyncImage(url: url) { phase in
+                                                        if let img = phase.image {
+                                                            img.resizable().scaledToFit()
+                                                        } else {
+                                                            Image(systemName: ch.contentType == "live" ? "antenna.radiowaves.left.and.right" : "film")
+                                                                .foregroundColor(.white.opacity(0.3))
+                                                        }
+                                                    }
+                                                    .frame(width: 32, height: 32)
+                                                    .cornerRadius(4)
+                                                } else {
+                                                    Image(systemName: ch.contentType == "live" ? "antenna.radiowaves.left.and.right" : "film")
+                                                        .foregroundColor(.white.opacity(0.3))
+                                                        .frame(width: 32, height: 32)
+                                                }
+                                                
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(ch.name)
+                                                        .font(.system(size: 13, weight: .semibold))
+                                                        .foregroundColor(selectedChannel?.url == ch.url ? Color(hex: "007FFF") : .white)
+                                                        .lineLimit(1)
+                                                        .multilineTextAlignment(.leading)
+                                                    
+                                                    Text(ch.safeGroup)
+                                                        .font(.system(size: 10))
+                                                        .foregroundColor(.white.opacity(0.4))
+                                                        .lineLimit(1)
+                                                        .multilineTextAlignment(.leading)
+                                                }
+                                                Spacer()
+                                            }
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(selectedChannel?.url == ch.url ? Color.white.opacity(0.08) : Color.clear)
+                                            .cornerRadius(8)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                            }
+                        }
+                        .frame(width: 300)
+                        .background(.ultraThinMaterial)
+                        .ignoresSafeArea()
+                        .transition(.move(edge: .trailing))
+                    }
+                    .zIndex(1000)
                 }
             } else {
                  Color.black
@@ -2399,6 +2524,12 @@ struct ContentView: View {
         UserDefaults.standard.set(Array(favourites), forKey: "fav_playlist")
     }
     
+    func closeSelectedChannel() {
+        globalPlayerInfo.stop()
+        selectedChannel = nil
+        isLandscape = false
+    }
+    
     // MARK: - Authentication Logouts
     func logoutAccount() {
         channels = []
@@ -2742,10 +2873,12 @@ struct ContentView: View {
                     let nameLower = currentName.lowercased()
                     let contentType: String
                     
-                    let isVideoFile = clean.lowercased().hasSuffix(".mkv") || clean.lowercased().hasSuffix(".mp4") || clean.lowercased().hasSuffix(".avi") || clean.lowercased().hasSuffix(".mov")
-                    if grpLower.contains("dizi") || grpLower.contains("series") || grpLower.contains("sezon") || grpLower.contains("season") {
+                    let isVideoFile = clean.lowercased().hasSuffix(".mkv") || clean.lowercased().hasSuffix(".mp4") || clean.lowercased().hasSuffix(".avi") || clean.lowercased().hasSuffix(".mov") || clean.lowercased().contains("/movie/")
+                    let isLiveGroupWord = grpLower.contains("canli") || grpLower.contains("canlı") || grpLower.contains("tv") || grpLower.contains("hd") || grpLower.contains("yayin") || grpLower.contains("yayın") || grpLower.contains("haber") || grpLower.contains("spor") || grpLower.contains("sport") || grpLower.contains("ulusal")
+                    
+                    if (grpLower.contains("dizi") || grpLower.contains("series") || grpLower.contains("sezon") || grpLower.contains("season")) && !isLiveGroupWord {
                         contentType = "series"
-                    } else if isVideoFile || grpLower.contains("film") || grpLower.contains("movie") || grpLower.contains("sinema") || grpLower.contains("vod") || grpLower.contains("cinema") || nameLower.contains("film:") || nameLower.contains("sinema:") {
+                    } else if (isVideoFile || grpLower.contains("film") || grpLower.contains("movie") || grpLower.contains("sinema") || grpLower.contains("vod") || grpLower.contains("cinema") || nameLower.contains("film:") || nameLower.contains("sinema:")) && !isLiveGroupWord {
                         contentType = "movie"
                     } else {
                         contentType = "live"
@@ -2821,10 +2954,12 @@ struct ContentView: View {
                     let nameLower = currentName.lowercased()
                     let contentType: String
                     
-                    let isVideoFile = clean.lowercased().hasSuffix(".mkv") || clean.lowercased().hasSuffix(".mp4") || clean.lowercased().hasSuffix(".avi") || clean.lowercased().hasSuffix(".mov")
-                    if grpLower.contains("dizi") || grpLower.contains("series") || grpLower.contains("sezon") || grpLower.contains("season") {
+                    let isVideoFile = clean.lowercased().hasSuffix(".mkv") || clean.lowercased().hasSuffix(".mp4") || clean.lowercased().hasSuffix(".avi") || clean.lowercased().hasSuffix(".mov") || clean.lowercased().contains("/movie/")
+                    let isLiveGroupWord = grpLower.contains("canli") || grpLower.contains("canlı") || grpLower.contains("tv") || grpLower.contains("hd") || grpLower.contains("yayin") || grpLower.contains("yayın") || grpLower.contains("haber") || grpLower.contains("spor") || grpLower.contains("sport") || grpLower.contains("ulusal")
+                    
+                    if (grpLower.contains("dizi") || grpLower.contains("series") || grpLower.contains("sezon") || grpLower.contains("season")) && !isLiveGroupWord {
                         contentType = "series"
-                    } else if isVideoFile || grpLower.contains("film") || grpLower.contains("movie") || grpLower.contains("sinema") || grpLower.contains("vod") || grpLower.contains("cinema") || nameLower.contains("film:") || nameLower.contains("sinema:") {
+                    } else if (isVideoFile || grpLower.contains("film") || grpLower.contains("movie") || grpLower.contains("sinema") || grpLower.contains("vod") || grpLower.contains("cinema") || nameLower.contains("film:") || nameLower.contains("sinema:")) && !isLiveGroupWord {
                         contentType = "movie"
                     } else {
                         contentType = "live"
