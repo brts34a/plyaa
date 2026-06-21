@@ -206,6 +206,9 @@ class PlayerInfoManager: ObservableObject {
     @Published var isAudioOnly: Bool = false
     @Published var isOverlayVisible: Bool = true
     @Published var isPlaying: Bool = true
+    @Published var currentTime: Double = 0.0
+    @Published var duration: Double = 1.0
+    
     weak var player: AVPlayerUIView?
     var timer: Timer?
     var hideTimer: Timer?
@@ -226,7 +229,7 @@ class PlayerInfoManager: ObservableObject {
             if let item = p.currentItem {
                 let size = item.presentationSize
                 if size.height > 10 {
-                    self.resolutionString = "\(Int(size.height))p 50FPS"
+                    self.resolutionString = "\(Int(size.height))p"
                 }
             }
         }
@@ -241,6 +244,13 @@ class PlayerInfoManager: ObservableObject {
             p.play()
             isPlaying = true
         }
+    }
+    
+    func seek(to seconds: Double) {
+        guard let p = player?.player else { return }
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        p.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        self.currentTime = seconds
     }
     
     func userTapped() {
@@ -265,6 +275,8 @@ class PlayerInfoManager: ObservableObject {
         DispatchQueue.main.async {
             self.resolutionString = "Bağlanıyor..."
             self.isPlaying = false
+            self.currentTime = 0.0
+            self.duration = 1.0
         }
     }
     
@@ -358,6 +370,13 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         }
         
         if context.coordinator.currentUrl != normalized {
+            // Remove previous observer first
+            if let oldToken = context.coordinator.timeObserverToken {
+                context.coordinator.player?.removeTimeObserver(oldToken)
+                context.coordinator.timeObserverToken = nil
+            }
+            context.coordinator.statusObservation?.invalidate()
+            
             context.coordinator.currentUrl = normalized
             
             // The Magic Trick: AVPlayer struggles with raw .ts streams.
@@ -376,23 +395,19 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 let asset = AVURLAsset(url: targetUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
                 let item = AVPlayerItem(asset: asset)
                 
-                // Advanced live IPTV buffering and anti-stutter optimizations
-                item.preferredForwardBufferDuration = 6.0 // Keeps 6s buffer ahead of playing to absorb network drops
-                item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
-
-                
+                // Native direct playback behavior for maximum compatibility & zero stalling
                 let player = AVPlayer(playerItem: item)
-                player.automaticallyWaitsToMinimizeStalling = true // Waits gracefully for dynamic buffers to minimize stalling
                 uiView.player = player
                 context.coordinator.player = player
                 
                 context.coordinator.statusObservation = player.currentItem?.observe(\.status, options: [.new, .old]) { item, _ in
                     if item.status == .readyToPlay {
                         DispatchQueue.main.async {
-                            context.coordinator.infoManager?.resolutionString = "Oynatılıyor"
                             let size = item.presentationSize
-                            if size.width > 0 && size.height > 0 {
+                            if size.height > 10 {
                                 context.coordinator.infoManager?.resolutionString = "\(Int(size.height))p"
+                            } else {
+                                context.coordinator.infoManager?.resolutionString = "1080p"
                             }
                         }
                     } else if item.status == .failed {
@@ -402,12 +417,21 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                     }
                 }
                 
+                // Add periodic time observer to track current playback time and total duration
+                let token = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak infoManager = context.coordinator.infoManager] time in
+                    guard let infoManager = infoManager else { return }
+                    infoManager.currentTime = time.seconds
+                    if let dur = player.currentItem?.duration, dur.isValid && !dur.seconds.isNaN && !dur.seconds.isInfinite {
+                        infoManager.duration = dur.seconds
+                    }
+                }
+                context.coordinator.timeObserverToken = token
+                
                 player.play()
                 
                 DispatchQueue.main.async {
                     context.coordinator.infoManager?.isPlaying = true
                     // Provide a reference to the player layer instance so togglePlayPause works
-                    // Context infoManager can store an Any? reference to AVPlayer 
                     context.coordinator.infoManager?.player = uiView
                 }
             }
@@ -433,11 +457,11 @@ struct PlayerOverlaySwiftUIView: View {
                         Spacer()
                         
                         if info.isOverlayVisible {
-                            // Kalite / FPS
+                            // Kalite
                             HStack(spacing: 4) {
-                                Image(systemName: info.isAudioOnly ? "waveform" : "bolt.horizontal.fill")
-                                    .foregroundColor(info.isAudioOnly ? Color.orange : Color(hex: "6D28D9"))
-                                Text(info.resolutionString)
+                                Image(systemName: info.isAudioOnly ? "waveform" : "video.fill")
+                                    .foregroundColor(info.isAudioOnly ? Color.orange : Color(hex: "007FFF"))
+                                Text("Kalite: " + info.resolutionString)
                                     .fontWeight(.bold)
                             }
                             .padding(.horizontal, 10)
@@ -998,7 +1022,7 @@ struct ContentView: View {
                             .cornerRadius(12)
                         }
                         .padding(.horizontal, 20)
-                        .onTapGesture { selectedChannel = channel }
+                        .onTapGesture { playChannel(channel) }
                     }
                 }
                 
@@ -1133,7 +1157,7 @@ struct ContentView: View {
                         let isSelected = selectedChannel?.url == channel.url
                         
                         // Left Logo Box
-                        Button(action: { selectedChannel = channel }) {
+                        Button(action: { playChannel(channel) }) {
                             ZStack {
                                 RoundedRectangle(cornerRadius: 12)
                                     .fill(colorForChannel(channel.name))
@@ -1163,7 +1187,7 @@ struct ContentView: View {
                                     isActive: true,
                                     isSelected: isSelected,
                                     width: UIScreen.main.bounds.width - 120, // Occupy most space
-                                    onPress: { selectedChannel = channel }
+                                    onPress: { playChannel(channel) }
                                 )
                                 
                                 let nextTitle = EPGManager.shared.nextProgramName(for: channel)
@@ -1174,7 +1198,7 @@ struct ContentView: View {
                                         isActive: false,
                                         isSelected: false,
                                         width: 140,
-                                        onPress: { selectedChannel = channel }
+                                        onPress: { playChannel(channel) }
                                     )
                                 }
                             }
@@ -1539,7 +1563,7 @@ struct ContentView: View {
                     }()
                     
                     ForEach(uniqueFilteredItems, id: \.id) { channel in
-                        Button(action: { selectedChannel = channel }) {
+                        Button(action: { playChannel(channel) }) {
                             VStack(alignment: .leading, spacing: 8) {
                                 ZStack {
                                     RoundedRectangle(cornerRadius: 12)
@@ -1638,7 +1662,7 @@ struct ContentView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(channels.filter({ $0.contentType == "live" }).prefix(20)) { channel in
-                                Button(action: { selectedChannel = channel; currentTab = .live }) {
+                                Button(action: { playChannel(channel) }) {
                                     ZStack {
                                         RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.05))
                                         if let url = URL(string: channel.logo) {
@@ -1721,7 +1745,7 @@ struct ContentView: View {
                  HStack(spacing: 12) {
                      let items = getUniqueChannels(type: type, limit: 15, reversed: type == "series", sortByRecent: title.localizedCaseInsensitiveContains("son eklenenler") || title.localizedCaseInsensitiveContains("yeni"))
                      ForEach(items) { channel in
-                         Button(action: { selectedChannel = channel }) {
+                         Button(action: { playChannel(channel) }) {
                              VStack(alignment: .leading, spacing: 8) {
                                  ZStack {
                                      RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.05))
@@ -1966,6 +1990,9 @@ struct ContentView: View {
     func tabItem(title: String, icon: String, tab: AppTab, isCircle: Bool = false) -> some View {
         Button(action: {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                if tab == .home {
+                    closeSelectedChannel()
+                }
                 if currentTab == tab {
                     // Reset tab state if already active
                     if tab == .live { activeLiveCategory = nil }
@@ -2216,10 +2243,10 @@ struct ContentView: View {
                                 
                                 // Top Right: Active stable resolution
                                 HStack(spacing: 6) {
-                                    Image(systemName: "bolt.horizontal.fill")
+                                    Image(systemName: "video.fill")
                                         .foregroundColor(Color(hex: "007FFF"))
-                                    Text(globalPlayerInfo.resolutionString)
-                                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                    Text("Kalite: " + globalPlayerInfo.resolutionString)
+                                        .font(.system(size: 11, weight: .bold))
                                         .foregroundColor(.white)
                                 }
                                 .padding(.horizontal, 12)
@@ -2252,77 +2279,105 @@ struct ContentView: View {
                             
                             Spacer()
                             
-                            // Bottom Section (Active TV information + action options)
-                            HStack(alignment: .bottom) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    // Live Badge
-                                    HStack(spacing: 4) {
-                                        Circle().fill(Color.red).frame(width: 6, height: 6)
-                                        Text("CANLI")
-                                            .font(.system(size: 9, weight: .black))
-                                            .foregroundColor(.red)
+                            // Bottom Section (Active TV/Movie information + action options)
+                            VStack(spacing: 12) {
+                                if channel.contentType != "live" {
+                                    VStack(spacing: 4) {
+                                        // Movie/Series Time Slider
+                                        Slider(value: Binding(
+                                            get: { globalPlayerInfo.currentTime },
+                                            set: { val in globalPlayerInfo.seek(to: val) }
+                                        ), in: 0...max(1.0, globalPlayerInfo.duration))
+                                        .accentColor(Color(hex: "007FFF"))
+                                        
+                                        // Time details labels
+                                        HStack {
+                                            Text(formatTime(seconds: globalPlayerInfo.currentTime))
+                                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                                .foregroundColor(.white.opacity(0.7))
+                                            
+                                            Spacer()
+                                            
+                                            let remaining = globalPlayerInfo.duration - globalPlayerInfo.currentTime
+                                            Text("-" + formatTime(seconds: max(0, remaining)))
+                                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                                .foregroundColor(.white.opacity(0.7))
+                                        }
                                     }
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.black.opacity(0.5))
-                                    .cornerRadius(4)
-                                    
-                                    Text(channel.name)
-                                        .font(.system(size: 16, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .lineLimit(1)
-                                    
-                                    Text(channel.safeGroup)
-                                        .font(.system(size: 13, weight: .regular))
-                                        .foregroundColor(.white.opacity(0.6))
-                                        .lineLimit(1)
+                                    .environment(\.colorScheme, .dark)
                                 }
                                 
-                                Spacer()
-                                
-                                // Bottom Action Options (Settings, Toggle Favourite, Channel Selector)
-                                HStack(spacing: 12) {
-                                    Button(action: {
-                                        withAnimation {
-                                            showLandscapeSettings.toggle()
-                                            showLandscapeChannelList = false
+                                HStack(alignment: .bottom) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        // Dynamic Badge
+                                        HStack(spacing: 4) {
+                                            Circle().fill(channel.contentType == "live" ? Color.red : Color(hex: "007FFF")).frame(width: 6, height: 6)
+                                            Text(channel.contentType == "live" ? "CANLI" : (channel.contentType == "movie" ? "FİLM" : "DİZİ"))
+                                                .font(.system(size: 9, weight: .black))
+                                                .foregroundColor(channel.contentType == "live" ? .red : Color(hex: "007FFF"))
                                         }
-                                        resetTimer()
-                                    }) {
-                                        Image(systemName: "gearshape.fill")
-                                            .font(.system(size: 16, weight: .medium))
-                                            .foregroundColor(showLandscapeSettings ? Color(hex: "007FFF") : .white)
-                                            .frame(width: 44, height: 44)
-                                            .background(Color.black.opacity(0.45))
-                                            .clipShape(Circle())
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.black.opacity(0.5))
+                                        .cornerRadius(4)
+                                        
+                                        Text(channel.name)
+                                            .font(.system(size: 16, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .lineLimit(1)
+                                        
+                                        Text(channel.safeGroup)
+                                            .font(.system(size: 13, weight: .regular))
+                                            .foregroundColor(.white.opacity(0.6))
+                                            .lineLimit(1)
                                     }
                                     
-                                    Button(action: {
-                                        toggleFavourite(channel.url)
-                                        resetTimer()
-                                    }) {
-                                        Image(systemName: favourites.contains(channel.url) ? "bookmark.fill" : "bookmark")
-                                            .font(.system(size: 16, weight: .medium))
-                                            .foregroundColor(favourites.contains(channel.url) ? .yellow : .white)
-                                            .frame(width: 44, height: 44)
-                                            .background(Color.black.opacity(0.45))
-                                            .clipShape(Circle())
-                                    }
+                                    Spacer()
                                     
-                                    Button(action: {
-                                        withAnimation {
-                                            showLandscapeChannelList.toggle()
-                                            showLandscapeSettings = false
-                                            selectedLandscapeGroup = channel.safeGroup // auto select current group!
+                                    // Bottom Action Options (Settings, Toggle Favourite, Channel Selector)
+                                    HStack(spacing: 12) {
+                                        Button(action: {
+                                            withAnimation {
+                                                showLandscapeSettings.toggle()
+                                                showLandscapeChannelList = false
+                                            }
+                                            resetTimer()
+                                        }) {
+                                            Image(systemName: "gearshape.fill")
+                                                .font(.system(size: 16, weight: .medium))
+                                                .foregroundColor(showLandscapeSettings ? Color(hex: "007FFF") : .white)
+                                                .frame(width: 44, height: 44)
+                                                .background(Color.black.opacity(0.45))
+                                                .clipShape(Circle())
                                         }
-                                        resetTimer()
-                                    }) {
-                                        Image(systemName: "list.bullet")
-                                            .font(.system(size: 16, weight: .medium))
-                                            .foregroundColor(showLandscapeChannelList ? Color(hex: "007FFF") : .white)
-                                            .frame(width: 44, height: 44)
-                                            .background(Color.black.opacity(0.45))
-                                            .clipShape(Circle())
+                                        
+                                        Button(action: {
+                                            toggleFavourite(channel.url)
+                                            resetTimer()
+                                        }) {
+                                            Image(systemName: favourites.contains(channel.url) ? "bookmark.fill" : "bookmark")
+                                                .font(.system(size: 16, weight: .medium))
+                                                .foregroundColor(favourites.contains(channel.url) ? .yellow : .white)
+                                                .frame(width: 44, height: 44)
+                                                .background(Color.black.opacity(0.45))
+                                                .clipShape(Circle())
+                                        }
+                                        
+                                        Button(action: {
+                                            withAnimation {
+                                                showLandscapeChannelList.toggle()
+                                                showLandscapeSettings = false
+                                                selectedLandscapeGroup = channel.safeGroup // auto select current group!
+                                            }
+                                            resetTimer()
+                                        }) {
+                                            Image(systemName: "list.bullet")
+                                                .font(.system(size: 16, weight: .medium))
+                                                .foregroundColor(showLandscapeChannelList ? Color(hex: "007FFF") : .white)
+                                                .frame(width: 44, height: 44)
+                                                .background(Color.black.opacity(0.45))
+                                                .clipShape(Circle())
+                                        }
                                     }
                                 }
                             }
@@ -2593,7 +2648,7 @@ struct ContentView: View {
                                                     .foregroundColor(.white)
                                             }
                                             HStack {
-                                                Text("Çözünürlük")
+                                                Text("Kalite")
                                                     .foregroundColor(.white.opacity(0.4))
                                                 Spacer()
                                                 Text(globalPlayerInfo.resolutionString)
@@ -3000,7 +3055,7 @@ struct ContentView: View {
                     isSelected: selectedChannel?.url == channel.url,
                     isFavorite: favourites.contains(channel.url),
                     onTapFavorite: { toggleFavourite(channel.url) },
-                    onTapChannel: { selectedChannel = channel }
+                    onTapChannel: { playChannel(channel) }
                 )
                 .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
                 .listRowSeparator(.hidden)
@@ -3162,6 +3217,38 @@ struct ContentView: View {
         isLandscape = false
         showLandscapeChannelList = false
         showLandscapeSettings = false
+    }
+    
+    func formatTime(seconds: Double) -> String {
+        guard !seconds.isNaN && !seconds.isInfinite && seconds >= 0 else { return "00:00" }
+        let h = Int(seconds) / 3600
+        let m = (Int(seconds) % 3600) / 60
+        let s = Int(seconds) % 60
+        if h > 0 {
+            return String(format: "%d:%02d:%02d", h, m, s)
+        } else {
+            return String(format: "%02d:%02d", m, s)
+        }
+    }
+    
+    func playChannel(_ channel: Channel) {
+        if channel.contentType == "live" {
+            currentTab = .live
+            activeLiveCategory = channel.safeGroup
+            selectedChannel = channel
+        } else if channel.contentType == "movie" {
+            currentTab = .library
+            contentTypeFilter = "movie"
+            selectedCategory = channel.safeGroup
+            selectedChannel = channel
+        } else if channel.contentType == "series" {
+            currentTab = .library
+            contentTypeFilter = "series"
+            selectedCategory = channel.safeGroup
+            selectedChannel = channel
+        } else {
+            selectedChannel = channel
+        }
     }
     
     // MARK: - Authentication Logouts
