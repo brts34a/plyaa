@@ -288,7 +288,6 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         // Optimize for IPTV streams
         KSOptions.isAutoPlay = true
         KSOptions.preferredForwardBufferDuration = 1.5
-        KSOptions.userAgent = "VLC/3.0.18 LibVLC/3.0.18"
         
         let playerView = IOSVideoPlayerView()
         playerView.backgroundColor = .black
@@ -314,6 +313,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 try? AVAudioSession.sharedInstance().setActive(true)
                 
                 let options = KSOptions()
+                options.userAgent = "VLC/3.0.18 LibVLC/3.0.18"
                 uiView.set(url: targetUrl, options: options)
                 uiView.play()
                 
