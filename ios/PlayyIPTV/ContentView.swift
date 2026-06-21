@@ -404,17 +404,15 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             
             context.coordinator.currentUrl = normalized
             
-            // The Magic Trick: AVPlayer struggles with raw .ts streams.
-            // If the URL ends with .ts, we replace it with .m3u8.
-            // Xtream Codes natively supports this and returns an HLS stream which AVPlayer prefers.
+            // The Magic Trick: AVPlayer does not natively support raw MPEG2-TS streams.
+            // If the URL contains .ts (including suffix or in query parameters/streams), we convert it to .m3u8.
+            // This forces IPTV servers (Xtream, 1-stream, etc.) to wrap the broadcast in HLS, allowing AVPlayer to play it flawlessly.
             var playableUrlString = normalized
-            if playableUrlString.hasSuffix(".ts") {
-                // If it's an Xtream Codes style URL (even inside an M3U playlist), it supports HLS rewriting.
-                // Otherwise, keep the raw .ts stream because general .ts broadcasts don't have .m3u8 versions.
-                let isXtreamPattern = normalized.contains("/live/") || normalized.contains("/movie/") || normalized.contains("/series/")
-                if isXtreamPattern {
-                    playableUrlString = playableUrlString.replacingOccurrences(of: ".ts", with: ".m3u8")
-                }
+            if playableUrlString.contains(".ts") {
+                playableUrlString = playableUrlString.replacingOccurrences(of: ".ts", with: ".m3u8")
+            }
+            if playableUrlString.contains("output=ts") {
+                playableUrlString = playableUrlString.replacingOccurrences(of: "output=ts", with: "output=m3u8")
             }
             
             if let targetUrl = URL(string: playableUrlString) {
@@ -430,7 +428,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
                 
                 let player = AVPlayer(playerItem: item)
-                player.automaticallyWaitsToMinimizeStalling = true // protects against stream crashing on slow networks
+                player.automaticallyWaitsToMinimizeStalling = false // false avoids buffering delay and starts playback immediately
                 uiView.player = player
                 context.coordinator.player = player
                 
