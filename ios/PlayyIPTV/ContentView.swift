@@ -3,6 +3,7 @@ import AVKit
 import Combine
 import AVFoundation
 import MediaPlayer
+import zlib
 
 // MARK: - Safe Decoder Int/String Helper for Xtream Codes Compatibility
 enum SafeStringOrInt: Codable, Hashable {
@@ -328,6 +329,8 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             view.playerLayer.videoGravity = .resizeAspectFill
         case .scaleAspectFit:
             view.playerLayer.videoGravity = .resizeAspect
+        case .scaleToFill:
+            view.playerLayer.videoGravity = .resize
         default:
             view.playerLayer.videoGravity = .resizeAspect
         }
@@ -336,6 +339,18 @@ struct NativeVideoPlayerView: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: AVPlayerUIView, context: Context) {
+        // Update player gravity dynamically on changes
+        switch videoContentMode {
+        case .scaleAspectFill:
+            uiView.playerLayer.videoGravity = .resizeAspectFill
+        case .scaleAspectFit:
+            uiView.playerLayer.videoGravity = .resizeAspect
+        case .scaleToFill:
+            uiView.playerLayer.videoGravity = .resize
+        default:
+            uiView.playerLayer.videoGravity = .resizeAspect
+        }
+        
         let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
             uiView.player?.pause()
@@ -2439,8 +2454,9 @@ struct ContentView: View {
                                     }
                                     .padding(.horizontal, 16)
                                 }
+                                .id(selectedLandscapeGroup + "_" + landscapeSearchQuery)
                                 .onAppear {
-                                    if let selected = selectedChannel {
+                                    if let selected = selectedChannel, landscapeFilteredChannels.contains(where: { $0.url == selected.url }) {
                                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                                             withAnimation {
                                                 proxy.scrollTo(selected.url, anchor: .center)
@@ -2449,7 +2465,7 @@ struct ContentView: View {
                                     }
                                 }
                                 .onChange(of: selectedLandscapeGroup) { _ in
-                                    if let selected = selectedChannel {
+                                    if let selected = selectedChannel, landscapeFilteredChannels.contains(where: { $0.url == selected.url }) {
                                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                                             withAnimation {
                                                 proxy.scrollTo(selected.url, anchor: .center)
@@ -3304,7 +3320,7 @@ struct ContentView: View {
         iptvMode = account.mode
         
         UniqueChannelsCache.clear()
-        // EPGManager.shared.fetchEPG(for: account)
+        EPGManager.shared.fetchEPG(for: account)
         
         if account.mode == 0 {
             self.m3uUrl = account.m3uUrl
@@ -3344,7 +3360,7 @@ struct ContentView: View {
                     xtreamUser = first.xtreamUser
                     xtreamPass = first.xtreamPass
                 }
-                // EPGManager.shared.fetchEPG(for: first)
+                EPGManager.shared.fetchEPG(for: first)
             }
         } else {
             if let matched = accounts.first(where: { $0.id.uuidString == activeAccountIdString }) {
@@ -3356,7 +3372,7 @@ struct ContentView: View {
                     xtreamUser = matched.xtreamUser
                     xtreamPass = matched.xtreamPass
                 }
-                // EPGManager.shared.fetchEPG(for: matched)
+                EPGManager.shared.fetchEPG(for: matched)
             }
         }
         
@@ -5546,7 +5562,14 @@ class EPGManager: ObservableObject {
                 return
             }
             
-            self.xmltvParser.parse(data: data) { result in
+            let finalData: Data
+            if data.isGzipped(), let decompressed = data.gunzipped() {
+                finalData = decompressed
+            } else {
+                finalData = data
+            }
+            
+            self.xmltvParser.parse(data: finalData) { result in
                 DispatchQueue.main.async {
                     self.currentPrograms = result.current
                     self.nextPrograms = result.next
@@ -5723,6 +5746,7 @@ class XMLTVParser: NSObject, XMLParserDelegate {
         if elementName == "channel" {
             isParsingChannel = true
             currentChannelId = attributeDict["id"]
+            currentDisplayName = ""
         } else if elementName == "programme" {
             isParsingChannel = false
             currentChannelId = attributeDict["channel"]
@@ -5765,15 +5789,48 @@ class XMLTVParser: NSObject, XMLParserDelegate {
     }
     
     private func parseXMLDate(_ string: String?) -> Date? {
-        guard let s = string?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMddHHmmss Z"
-        if let d = formatter.date(from: s) { return d }
+        guard var s = string?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
         
-        formatter.dateFormat = "yyyyMMddHHmmss"
-        if s.count >= 14 {
-            return formatter.date(from: String(s.prefix(14)))
+        let formatters: [DateFormatter] = {
+            let f1 = DateFormatter()
+            f1.dateFormat = "yyyyMMddHHmmss Z"
+            
+            let f2 = DateFormatter()
+            f2.dateFormat = "yyyyMMddHHmmss"
+            
+            let f3 = DateFormatter()
+            f3.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            
+            let f4 = DateFormatter()
+            f4.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+            
+            return [f1, f2, f3, f4]
+        }()
+        
+        for formatter in formatters {
+            if let date = formatter.date(from: s) {
+                return date
+            }
         }
+        
+        if s.contains(":") {
+            let components = s.components(separatedBy: " ")
+            if components.count == 2 {
+                let tz = components[1].replacingOccurrences(of: ":", with: "")
+                let cleanS = "\(components[0]) \(tz)"
+                let f = DateFormatter()
+                f.dateFormat = "yyyyMMddHHmmss Z"
+                if let d = f.date(from: cleanS) { return d }
+            }
+        }
+        
+        if s.count >= 14 {
+            let prefix14 = String(s.prefix(14))
+            let f = DateFormatter()
+            f.dateFormat = "yyyyMMddHHmmss"
+            if let d = f.date(from: prefix14) { return d }
+        }
+        
         return nil
     }
 }
@@ -5784,5 +5841,52 @@ extension String {
     func decodeBase64IfNeeded() -> String {
         guard let data = Data(base64Encoded: self) else { return self }
         return String(data: data, encoding: .utf8) ?? self
+    }
+}
+
+extension Data {
+    public func isGzipped() -> Bool {
+        return self.starts(with: [0x1f, 0x8b])
+    }
+    
+    public func gunzipped() -> Data? {
+        guard self.isGzipped() else { return self }
+        
+        var stream = z_stream()
+        var status: Int32
+        
+        status = self.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) -> Int32 in
+            guard let baseAddress = bytes.baseAddress else { return Z_STREAM_ERROR }
+            stream.next_in = UnsafeMutablePointer<UInt8>(mutating: baseAddress.assumingMemoryBound(to: UInt8.self))
+            stream.avail_in = uInt(bytes.count)
+            return Z_OK
+        }
+        
+        guard status == Z_OK else { return nil }
+        
+        status = inflateInit2_(&stream, 15 + 32, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
+        guard status == Z_OK else { return nil }
+        
+        defer { inflateEnd(&stream) }
+        
+        var decompressed = Data()
+        let bufferSize = 65536
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+        
+        repeat {
+            stream.next_out = buffer
+            stream.avail_out = uInt(bufferSize)
+            
+            status = inflate(&stream, Z_NO_FLUSH)
+            
+            let bytesDecompressed = bufferSize - Int(stream.avail_out)
+            if bytesDecompressed > 0 {
+                decompressed.append(buffer, count: bytesDecompressed)
+            }
+        } while status == Z_OK
+        
+        guard status == Z_STREAM_END else { return nil }
+        return decompressed
     }
 }
