@@ -248,7 +248,7 @@ class PlayerInfoManager: ObservableObject {
     
     func seek(to seconds: Double) {
         if let ks = ksPlayer {
-            ks.player.seek(time: seconds) { _ in }
+            ks.player?.seek(time: seconds) { _ in }
             self.currentTime = seconds
         }
     }
@@ -256,7 +256,7 @@ class PlayerInfoManager: ObservableObject {
     func scrubValueUpdated(to seconds: Double) {
         scrubbingTime = seconds
         if let ks = ksPlayer {
-            ks.player.seek(time: seconds) { _ in }
+            ks.player?.seek(time: seconds) { _ in }
         }
     }
     
@@ -267,7 +267,7 @@ class PlayerInfoManager: ObservableObject {
             return
         }
         if let ks = ksPlayer {
-            ks.player.seek(time: seconds) { [weak self] _ in
+            ks.player?.seek(time: seconds) { [weak self] _ in
                 DispatchQueue.main.async {
                     self?.currentTime = seconds
                     self?.isScrubbing = false
@@ -347,7 +347,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
     var showsPlaybackControls: Bool = true
     var isLive: Bool = false
     
-    class Coordinator: NSObject, IOSVideoPlayerViewDelegate {
+    class Coordinator: NSObject, PlayerControllerDelegate {
         var currentUrl: String = ""
         var containerView: PlayerContainerView?
         weak var infoManager: PlayerInfoManager?
@@ -361,15 +361,15 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             DispatchQueue.main.async { [weak self] in
                 guard let self = self, let infoManager = self.infoManager else { return }
                 switch state {
-                case .prepare:
+                case .preparing:
                     infoManager.resolutionString = "Yükleniyor..."
                 case .readyToPlay:
-                    infoManager.resolutionString = infoManager.ksPlayer?.player.isLive == true ? "1080p (Canlı)" : "1080p"
+                    infoManager.resolutionString = infoManager.ksPlayer?.player?.isLive == true ? "1080p (Canlı)" : "1080p"
                     infoManager.isPlaying = true
                 case .buffering:
                     infoManager.resolutionString = "Ara Bellek..."
                 case .bufferFinished:
-                    infoManager.resolutionString = infoManager.ksPlayer?.player.isLive == true ? "1080p (Canlı)" : "1080p"
+                    infoManager.resolutionString = infoManager.ksPlayer?.player?.isLive == true ? "1080p (Canlı)" : "1080p"
                     infoManager.isPlaying = true
                 case .playedToTheEnd:
                     infoManager.isPlaying = false
@@ -426,7 +426,6 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                     
                     let opt = KSOptions()
                     opt.hardwareDecode = true
-                    opt.isLive = isLive
                     
                     ksView.set(url: targetUrl, options: opt)
                     ksView.play()
