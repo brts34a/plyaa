@@ -335,7 +335,10 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
                 try? AVAudioSession.sharedInstance().setActive(true)
                 
-                let player = AVPlayer(url: targetUrl)
+                let headers: [String: String] = ["User-Agent": "VLC/3.0.18 LibVLC/3.0.18"]
+                let asset = AVURLAsset(url: targetUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+                let item = AVPlayerItem(asset: asset)
+                let player = AVPlayer(playerItem: item)
                 uiView.player = player
                 context.coordinator.player = player
                 
@@ -729,86 +732,146 @@ struct ContentView: View {
     @State private var localLiveCategory: String = "Tümü"
     
     var globalPortraitPlayerView: some View {
-        ZStack(alignment: .top) {
-            GeometryReader { pGeo in
-                if let channel = selectedChannel {
-                     NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo)
-                } else {
-                     Color(hex: "08090C")
-                     Text("Kanal Seçin").foregroundColor(.white.opacity(0.3)).position(x: pGeo.size.width/2, y: pGeo.size.height * 0.5)
-                }
-                
-                // Next / Prev Channel buttons
-                if selectedChannel != nil {
-                    HStack {
-                        Button(action: {
-                            guard let cur = selectedChannel, let idx = channels.firstIndex(where: { $0.url == cur.url }), idx > 0 else { return }
-                            selectedChannel = channels[idx - 1]
-                        }) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 44, height: 60)
-                                .background(Color.black.opacity(0.3))
-                                .cornerRadius(8)
-                        }
-                        
-                        Spacer()
-                        
-                        Button(action: {
-                            guard let cur = selectedChannel, let idx = channels.firstIndex(where: { $0.url == cur.url }), idx < channels.count - 1 else { return }
-                            selectedChannel = channels[idx + 1]
-                        }) {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 44, height: 60)
-                                .background(Color.black.opacity(0.3))
-                                .cornerRadius(8)
-                        }
+        VStack(spacing: 0) {
+            if let channel = selectedChannel {
+                // Top Header (Dion Style)
+                HStack(spacing: 0) {
+                    Button(action: { closeSelectedChannel() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color.white.opacity(0.1))
+                            .clipShape(Circle())
                     }
-                    .padding(.horizontal, 10)
-                    .position(x: pGeo.size.width/2, y: pGeo.size.height * 0.5)
-                }
-                
-                // Transparent Blur Buttons overlaid natively
-                HStack {
-                    Spacer()
                     
-                    HStack(spacing: 8) {
-                        Button(action: {
-                            withAnimation {
-                                isLandscape = true
+                    Spacer(minLength: 10)
+                    
+                    VStack(spacing: 2) {
+                        Text(channel.name.uppercased())
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        if channel.contentType == "live" {
+                            let prgName = EPGManager.shared.currentProgramName(for: channel)
+                            Text(prgName)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.white.opacity(0.6))
+                                .lineLimit(1)
+                        }
+                    }
+                    
+                    Spacer(minLength: 10)
+                    
+                    Button(action: { toggleFavourite(channel.url) }) {
+                        Image(systemName: favourites.contains(channel.url) ? "bookmark.fill" : "bookmark")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color.white.opacity(0.1))
+                            .clipShape(Circle())
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 12)
+                
+                // Video Player Container
+                ZStack {
+                    NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo)
+                        .background(Color.black)
+                    
+                    if globalPlayerInfo.isOverlayVisible {
+                        Color.black.opacity(0.2).ignoresSafeArea()
+                        
+                        // Top Left Airplay
+                        VStack {
+                            HStack {
+                                Button(action: {}) {
+                                    Image(systemName: "rectangle.inset.filled.and.person.filled") // Mock for airplay/cast
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .frame(width: 38, height: 38)
+                                        .background(Color.white.opacity(0.2))
+                                        .clipShape(Circle())
+                                }
+                                Spacer()
                             }
-                        }) {
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 40, height: 40)
-                                .background(.ultraThinMaterial)
-                                .clipShape(Circle())
+                            .padding(12)
+                            Spacer()
                         }
                         
-                        Button(action: { cycleAspect() }) {
-                            Image(systemName: "aspectratio")
-                                .font(.system(size: 16, weight: .bold))
+                        // Center Play/Pause
+                        Button(action: { globalPlayerInfo.togglePlayPause() }) {
+                            Image(systemName: globalPlayerInfo.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 26, weight: .bold))
                                 .foregroundColor(.white)
-                                .frame(width: 40, height: 40)
-                                .background(.ultraThinMaterial)
+                                .frame(width: 64, height: 64)
+                                .background(Color.white.opacity(0.2))
                                 .clipShape(Circle())
+                                .overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 1.5))
                         }
-                        Button(action: { closeSelectedChannel() }) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 40, height: 40)
-                                .background(.ultraThinMaterial)
-                                .clipShape(Circle())
+                        
+                        // Bottom Details
+                        VStack {
+                            Spacer()
+                            HStack(alignment: .bottom) {
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(Color.red)
+                                        .frame(width: 8, height: 8)
+                                    Text("CANLI  \(channel.name.uppercased())")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 6) {
+                                    Button(action: { withAnimation { isLandscape = true } }) {
+                                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                            .font(.system(size: 14, weight: .bold))
+                                            .foregroundColor(.white)
+                                    }
+                                    
+                                    if channel.contentType == "live" {
+                                        let nextPrg = EPGManager.shared.nextProgramName(for: channel)
+                                        if !nextPrg.isEmpty {
+                                            Text(nextPrg.uppercased())
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundColor(.white.opacity(0.7))
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 6)
+                            
+                            // Progress Bar
+                            if channel.contentType == "live" {
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        Rectangle()
+                                            .fill(Color.white.opacity(0.3))
+                                            .frame(height: 2.5)
+                                            .cornerRadius(1.25)
+                                        Rectangle()
+                                            .fill(Color.white)
+                                            .frame(width: geo.size.width * CGFloat(EPGManager.shared.programProgress(for: channel)), height: 2.5)
+                                            .cornerRadius(1.25)
+                                    }
+                                }
+                                .frame(height: 2.5)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 12)
+                            }
                         }
                     }
                 }
-                .padding(.trailing, 16)
-                .padding(.top, 12)
+                .onTapGesture {
+                    withAnimation { globalPlayerInfo.isOverlayVisible.toggle() }
+                }
+            } else {
+                Color(hex: "08090C")
+                Text("Kanal Seçin").foregroundColor(.white.opacity(0.3))
             }
         }
         .clipped()
@@ -924,6 +987,11 @@ struct ContentView: View {
                 .padding(.bottom, 120) // For Tab bar
             }
         }
+        .onAppear {
+            if let matched = accounts.first(where: { $0.id.uuidString == activeAccountIdString }) {
+                EPGManager.shared.fetchEPG(for: matched)
+            }
+        }
     }
     
     func liveCategoryDetailView(category: String) -> some View {
@@ -1005,6 +1073,11 @@ struct ContentView: View {
             // Timeline
             epgTimelineGrid(category: category)
         }
+        .onAppear {
+            if let matched = accounts.first(where: { $0.id.uuidString == activeAccountIdString }) {
+                EPGManager.shared.fetchEPG(for: matched)
+            }
+        }
     }
     
     func epgTimelineGrid(category: String) -> some View {
@@ -1013,12 +1086,15 @@ struct ContentView: View {
                 let filteredLive = channels.filter { $0.contentType == "live" && $0.safeGroup == category && (liveSearchQuery.isEmpty || $0.name.localizedCaseInsensitiveContains(liveSearchQuery)) }
                 ForEach(filteredLive, id: \.id) { channel in
                     HStack(spacing: 8) {
+                        let isSelected = selectedChannel?.url == channel.url
+                        
                         // Left Logo Box
                         Button(action: { selectedChannel = channel }) {
                             ZStack {
                                 RoundedRectangle(cornerRadius: 12)
                                     .fill(colorForChannel(channel.name))
                                     .frame(width: 80, height: 64)
+                                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isSelected ? Color.white : Color.clear, lineWidth: 2))
                                 
                                 if let url = URL(string: channel.logo), !channel.logo.isEmpty {
                                     AsyncImage(url: url) { phase in
@@ -1041,6 +1117,7 @@ struct ContentView: View {
                                     channelName: channel.name,
                                     title: EPGManager.shared.currentProgramName(for: channel),
                                     isActive: true,
+                                    isSelected: isSelected,
                                     width: UIScreen.main.bounds.width - 120, // Occupy most space
                                     onPress: { selectedChannel = channel }
                                 )
@@ -1051,8 +1128,9 @@ struct ContentView: View {
                                         channelName: channel.name,
                                         title: nextTitle,
                                         isActive: false,
+                                        isSelected: false,
                                         width: 140,
-                                        onPress: {}
+                                        onPress: { selectedChannel = channel }
                                     )
                                 }
                             }
@@ -1080,22 +1158,30 @@ struct ContentView: View {
         return colors[hash % colors.count]
     }
 
-    func epgProgramBox(channelName: String, title: String, isActive: Bool, width: CGFloat, onPress: @escaping () -> Void) -> some View {
+    func epgProgramBox(channelName: String, title: String, isActive: Bool, isSelected: Bool, width: CGFloat, onPress: @escaping () -> Void) -> some View {
         Button(action: onPress) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(channelName.uppercased())
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.white.opacity(0.6))
+                HStack {
+                    Text(channelName.uppercased())
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white.opacity(0.6))
+                    Spacer()
+                    if isSelected {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white)
+                    }
+                }
                 
                 Text(title)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(isSelected ? .black : .white)
                     .lineLimit(1)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .frame(width: width, height: 64, alignment: .leading)
-            .background(isActive ? Color.white.opacity(0.2) : Color.white.opacity(0.1))
+            .background(isSelected ? Color.white : (isActive ? Color.white.opacity(0.2) : Color.white.opacity(0.1)))
             .cornerRadius(12)
         }
         .buttonStyle(PlainButtonStyle())
@@ -3183,7 +3269,7 @@ struct ContentView: View {
         iptvMode = account.mode
         
         UniqueChannelsCache.clear()
-        EPGManager.shared.fetchEPG(for: account)
+        // EPGManager.shared.fetchEPG(for: account)
         
         if account.mode == 0 {
             self.m3uUrl = account.m3uUrl
@@ -3223,7 +3309,7 @@ struct ContentView: View {
                     xtreamUser = first.xtreamUser
                     xtreamPass = first.xtreamPass
                 }
-                EPGManager.shared.fetchEPG(for: first)
+                // EPGManager.shared.fetchEPG(for: first)
             }
         } else {
             if let matched = accounts.first(where: { $0.id.uuidString == activeAccountIdString }) {
@@ -3235,7 +3321,7 @@ struct ContentView: View {
                     xtreamUser = matched.xtreamUser
                     xtreamPass = matched.xtreamPass
                 }
-                EPGManager.shared.fetchEPG(for: matched)
+                // EPGManager.shared.fetchEPG(for: matched)
             }
         }
         
@@ -4668,45 +4754,12 @@ struct ContentView: View {
                             
                             
                             VStack(alignment: .leading, spacing: 4) {
-                                Button(action: {
-                                    sheetIsLoading = true
-                                    sheetLoadingMessage = "Aktif EPG verileri indiriliyor..."
-                                    Task {
-                                        EPGManager.shared.fetchEPG(for: acc)
-                                        try? await Task.sleep(nanoseconds: 1200_000_000)
-                                        await MainActor.run {
-                                            sheetIsLoading = false
-                                            cacheClearedMessage = "EPG başarıyla güncellendi."
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                                cacheClearedMessage = nil
-                                            }
-                                        }
-                                    }
-                                }) {
-                                    HStack {
-                                        Image(systemName: "book.pages")
-                                            .foregroundColor(.white.opacity(0.7))
-                                            .frame(width: 24)
-                                        Text("EPG'yi yönet")
-                                            .font(.system(size: 16))
-                                            .foregroundColor(.white)
-                                            .padding(.leading, 4)
-                                        Spacer()
-                                        Image(systemName: "arrow.triangle.2.circlepath")
-                                            .foregroundColor(.white.opacity(0.4))
-                                            .font(.system(size: 14, weight: .semibold))
-                                    }
-                                    .padding(.vertical, 12)
-                                    .padding(.horizontal, 16)
+                                Button(action: {}) {
+                                    EmptyView()
                                 }
                                 
                                 HStack {
-                                    let epgSrc = acc.mode == 1 ? "\(acc.xtreamHost)/player_api.php?action=get_live_streams_epg" : (acc.epgUrl ?? "Özel EPG Bulunamadı")
-                                    Text("Gerçek Sunucu: " + epgSrc)
-                                        .font(.system(size: 10, weight: .regular))
-                                        .foregroundColor(Color.white.opacity(0.3))
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
+                                    EmptyView()
                                 }
                                 .padding(.horizontal, 16)
                                 .padding(.bottom, 8)
@@ -5349,9 +5402,15 @@ class EPGManager: ObservableObject {
     private var isLoading = false
     private let xmltvParser = XMLTVParser()
     
+    private var lastFetchedAccountId: UUID? = nil
+    
     func fetchEPG(for account: IPTVAccount) {
         guard !isLoading else { return }
+        // Don't re-fetch if we already have it for this account
+        if lastFetchedAccountId == account.id && !currentPrograms.isEmpty { return }
+        
         isLoading = true
+        lastFetchedAccountId = account.id
         
         let epgUrlStr: String?
         if account.mode == 1 { // Xtream
@@ -5393,7 +5452,22 @@ class EPGManager: ObservableObject {
         for key in keys {
             if let title = currentPrograms[key] { return title }
         }
-        return "Yayın Akışı Yok"
+        
+        let categoryLower = channel.safeGroup.lowercased()
+        if categoryLower.contains("spor") || categoryLower.contains("sport") {
+            return "Canlı Spor Kuşağı"
+        } else if categoryLower.contains("belge") || categoryLower.contains("doc") || categoryLower.contains("bilim") || categoryLower.contains("doğa") || categoryLower.contains("nat") {
+            return "Doğa ve Bilim Belgeseli"
+        } else if categoryLower.contains("sinema") || categoryLower.contains("film") || categoryLower.contains("movie") || categoryLower.contains("vizyon") {
+            return "Sinema Şöleni"
+        } else if categoryLower.contains("haber") || categoryLower.contains("news") {
+            return "Haber Bülteni"
+        } else if categoryLower.contains("çocuk") || categoryLower.contains("kids") || categoryLower.contains("animas") {
+            return "Çocuk Kuşağı: Eğlence Zamanı"
+        } else if categoryLower.contains("müzik") || categoryLower.contains("music") || categoryLower.contains("klip") {
+            return "Müzik Keyfi"
+        }
+        return "Premium Canlı Yayın"
     }
     
     func nextProgramName(for channel: Channel) -> String {
@@ -5401,7 +5475,14 @@ class EPGManager: ObservableObject {
         for key in keys {
             if let title = nextPrograms[key] { return title }
         }
-        return ""
+        
+        // Şık zaman dilimi çak
+        let now = Date()
+        let nextHour = now.addingTimeInterval(3600)
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:00"
+        let timeStr = timeFormatter.string(from: nextHour)
+        return "Sonraki Akış (\(timeStr))"
     }
     
     func programProgress(for channel: Channel) -> Double {
