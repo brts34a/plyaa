@@ -396,32 +396,38 @@ struct PlayerOverlaySwiftUIView: View {
     @ObservedObject var info: PlayerInfoManager
     
     var body: some View {
-        VStack {
-            HStack(spacing: 8) {
-                Spacer()
-                
-                if info.isOverlayVisible {
-                    // Kalite / FPS
-                    HStack(spacing: 4) {
-                        Image(systemName: info.isAudioOnly ? "waveform" : "bolt.horizontal.fill")
-                            .foregroundColor(info.isAudioOnly ? Color.orange : Color(hex: "6D28D9"))
-                        Text(info.resolutionString)
-                            .fontWeight(.bold)
+        GeometryReader { geo in
+            let isLandscapeMode = geo.size.width > geo.size.height
+            
+            if !isLandscapeMode {
+                VStack {
+                    HStack(spacing: 8) {
+                        Spacer()
+                        
+                        if info.isOverlayVisible {
+                            // Kalite / FPS
+                            HStack(spacing: 4) {
+                                Image(systemName: info.isAudioOnly ? "waveform" : "bolt.horizontal.fill")
+                                    .foregroundColor(info.isAudioOnly ? Color.orange : Color(hex: "6D28D9"))
+                                Text(info.resolutionString)
+                                    .fontWeight(.bold)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(info.isAudioOnly ? Color.yellow.opacity(0.15) : Color.black.opacity(0.65))
+                            .cornerRadius(8)
+                            .transition(.opacity)
+                        }
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(info.isAudioOnly ? Color.yellow.opacity(0.15) : Color.black.opacity(0.65))
-                    .cornerRadius(8)
-                    .transition(.opacity)
+                    .font(.system(size: 11))
+                    .foregroundColor(.white)
+                    .padding(.top, 45) // Provides clearance for native back/close buttons on notch devices
+                    .padding(.trailing, 45)
+                    .animation(.easeInOut(duration: 0.3), value: info.isOverlayVisible)
+                    
+                    Spacer()
                 }
             }
-            .font(.system(size: 11))
-            .foregroundColor(.white)
-            .padding(.top, 45) // Provides clearance for native back/close buttons on notch devices
-            .padding(.trailing, 45)
-            .animation(.easeInOut(duration: 0.3), value: info.isOverlayVisible)
-            
-            Spacer()
         }
     }
 }
@@ -496,6 +502,10 @@ struct ContentView: View {
     @State private var isLandscape: Bool = false
     @State private var showLandscapeChannelList: Bool = false
     @State private var landscapeSearchQuery: String = ""
+    @State private var selectedLandscapeGroup: String = "Tümü"
+    @State private var showLandscapeSettings: Bool = false
+    @State private var showBrightnessPill: Bool = false
+    @State private var showVolumePill: Bool = false
     
     var body: some View {
         GeometryReader { geo in
@@ -1075,25 +1085,6 @@ struct ContentView: View {
                         .font(.system(size: 32, weight: .bold))
                         .foregroundColor(.white)
                     Spacer()
-                    
-                    HStack(spacing: 12) {
-                        Button(action: {}) {
-                            Image(systemName: "line.3.horizontal")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 40, height: 40)
-                                .background(Color.white.opacity(0.1))
-                                .clipShape(Circle())
-                        }
-                        Button(action: {}) {
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 40, height: 40)
-                                .background(Color.white.opacity(0.1))
-                                .clipShape(Circle())
-                        }
-                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 60)
@@ -1646,6 +1637,38 @@ struct ContentView: View {
         .padding(.bottom, 24)
     }
 
+    func cleanTitle(_ title: String) -> String {
+        var str = title.lowercased()
+        
+        // Remove text in brackets []
+        while let left = str.firstIndex(of: "["), let right = str.firstIndex(of: "]"), left < right {
+            str.removeSubrange(left...right)
+        }
+        
+        // Remove text in parentheses ()
+        while let left = str.firstIndex(of: "("), let right = str.firstIndex(of: ")"), left < right {
+            str.removeSubrange(left...right)
+        }
+        
+        // Split title into tokens using non-alphanumeric boundaries
+        let tokens = str.components(separatedBy: CharacterSet.alphanumerics.inverted)
+        
+        let unwantedTags: Set<String> = [
+            "1080p", "720p", "4k", "2160p", "uhd", "hd", "sd", "web-dl", "webdl", "bluray", "brrip",
+            "tr", "en", "fra", "ger", "dublaj", "alt", "altyazili", "altyazılı", "altyazı", "turkce", "türkçe",
+            "dual", "ses", "org", "orjinal", "orj", "filmi", "sinema", "dizisi", "h264", "h265", "hevc", "x264", "x265"
+        ]
+        
+        let filteredTokens = tokens.filter { token in
+            let cleanToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleanToken.isEmpty { return false }
+            return !unwantedTags.contains(cleanToken)
+        }
+        
+        let finalTitle = filteredTokens.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        return finalTitle.isEmpty ? title.lowercased() : finalTitle
+    }
+
     func getUniqueChannels(type: String, limit: Int, reversed: Bool) -> [Channel] {
         var list = [Channel]()
         var seenNames = Set<String>()
@@ -1654,10 +1677,10 @@ struct ContentView: View {
         let iterator = reversed ? AnySequence(filtered.reversed()) : AnySequence(filtered)
         
         for ch in iterator {
-            let normalizedName = ch.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let clearedName = cleanTitle(ch.name)
             let normalizedUrl = ch.url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            if !seenNames.contains(normalizedName) && !seenUrls.contains(normalizedUrl) {
-                seenNames.insert(normalizedName)
+            if !seenNames.contains(clearedName) && !seenUrls.contains(normalizedUrl) {
+                seenNames.insert(clearedName)
                 seenUrls.insert(normalizedUrl)
                 list.append(ch)
             }
@@ -1724,83 +1747,233 @@ struct ContentView: View {
 
     var landscapeFilteredChannels: [Channel] {
         let currentType = selectedChannel?.contentType ?? "live"
-        let list = channels.filter { $0.contentType == currentType }
-        if landscapeSearchQuery.isEmpty {
-            return list
-        } else {
-            return list.filter { $0.name.localizedCaseInsensitiveContains(landscapeSearchQuery) }
+        var list = channels.filter { $0.contentType == currentType }
+        
+        if selectedLandscapeGroup != "Tümü" && !selectedLandscapeGroup.isEmpty {
+            list = list.filter { $0.safeGroup == selectedLandscapeGroup }
         }
+        
+        if !landscapeSearchQuery.isEmpty {
+            list = list.filter { $0.name.localizedCaseInsensitiveContains(landscapeSearchQuery) }
+        }
+        return list
     }
 
     var landscapePlayerView: some View {
         ZStack {
             if let channel = selectedChannel {
+                // 1. Core Native Player
                 NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo, showsPlaybackControls: false)
                     .ignoresSafeArea()
+                
+                // 2. Base Tap-to-toggle overlay (propagates when clicking empty space)
+                Color.black.opacity(0.005)
+                    .ignoresSafeArea()
                     .onTapGesture {
-                        withAnimation { showingControls.toggle() }
-                        if showingControls { resetTimer() }
+                        withAnimation {
+                            showingControls.toggle()
+                        }
+                        if showingControls {
+                            resetTimer()
+                        }
                     }
                 
+                // 3. Left/Right Gestures for Brightness/Volume (on top of player, but below actual action overlays)
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        // Left 22% area: Brightness drag
+                        Color.black.opacity(0.005)
+                            .frame(width: geo.size.width * 0.22)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 10)
+                                    .onChanged { value in
+                                        withAnimation {
+                                            showBrightnessPill = true
+                                            showingControls = true
+                                            resetTimer()
+                                        }
+                                        let delta = value.translation.height / -400.0
+                                        brightnessLevel = max(0.0, min(1.0, brightnessLevel + delta))
+                                        UIScreen.main.brightness = brightnessLevel
+                                    }
+                                    .onEnded { _ in
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                            withAnimation {
+                                                showBrightnessPill = false
+                                            }
+                                        }
+                                    }
+                            )
+                        
+                        Spacer()
+                        
+                        // Right 22% area: Volume drag
+                        Color.black.opacity(0.005)
+                            .frame(width: geo.size.width * 0.22)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 10)
+                                    .onChanged { value in
+                                        withAnimation {
+                                            showVolumePill = true
+                                            showingControls = true
+                                            resetTimer()
+                                        }
+                                        let delta = value.translation.height / -400.0
+                                        let currentVol = Double(MPVolumeView.volumeSlider?.value ?? Float(volumeLevel))
+                                        let newVol = max(0.0, min(1.0, currentVol + Double(delta)))
+                                        MPVolumeView.volumeSlider?.value = Float(newVol)
+                                        volumeLevel = CGFloat(newVol)
+                                    }
+                                    .onEnded { _ in
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                            withAnimation {
+                                                showVolumePill = false
+                                            }
+                                        }
+                                    }
+                            )
+                    }
+                }
+                .ignoresSafeArea()
+                .zIndex(15)
+                
+                // 4. Vertical Sliding Indicators (Left: Brightness, Right: Volume)
+                HStack {
+                    // Left: Brightness
+                    if showBrightnessPill || showingControls {
+                        VStack(spacing: 12) {
+                            Image(systemName: "sun.max.fill")
+                                .foregroundColor(.white)
+                                .font(.system(size: 15, weight: .bold))
+                            
+                            GeometryReader { innerGeo in
+                                ZStack(alignment: .bottom) {
+                                    Capsule()
+                                        .fill(Color.white.opacity(0.12))
+                                    Capsule()
+                                        .fill(Color(hex: "007FFF"))
+                                        .frame(height: innerGeo.size.height * brightnessLevel)
+                                }
+                            }
+                            .frame(width: 6, height: 140)
+                            
+                            Text("\(Int(brightnessLevel * 100))%")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.vertical, 16)
+                        .padding(.horizontal, 10)
+                        .sexyGlass(cornerRadius: 20)
+                        .padding(.leading, 30)
+                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                    }
+                    
+                    Spacer()
+                    
+                    // Right: Volume
+                    if showVolumePill || showingControls {
+                        VStack(spacing: 12) {
+                            Image(systemName: volumeLevel > 0.5 ? "speaker.wave.3.fill" : (volumeLevel > 0 ? "speaker.wave.1.fill" : "speaker.slash.fill"))
+                                .foregroundColor(.white)
+                                .font(.system(size: 15, weight: .bold))
+                            
+                            GeometryReader { innerGeo in
+                                ZStack(alignment: .bottom) {
+                                    Capsule()
+                                        .fill(Color.white.opacity(0.12))
+                                    Capsule()
+                                        .fill(Color(hex: "007FFF"))
+                                        .frame(height: innerGeo.size.height * volumeLevel)
+                                }
+                            }
+                            .frame(width: 6, height: 140)
+                            
+                            Text("\(Int(volumeLevel * 100))%")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.vertical, 16)
+                        .padding(.horizontal, 10)
+                        .sexyGlass(cornerRadius: 20)
+                        .padding(.trailing, 30)
+                        .transition(.opacity.combined(with: .move(edge: .trailing)))
+                    }
+                }
+                .zIndex(50)
+                
+                // 5. Controls Overlay (Top section, Center section, Bottom section)
                 if showingControls {
-                    Color.black.opacity(0.4).ignoresSafeArea() // dim background
+                    Color.black.opacity(0.35).ignoresSafeArea() // safe dim background behind overlay
+                        .onTapGesture {
+                            withAnimation {
+                                showingControls = false
+                            }
+                        }
+                        .zIndex(90)
                     
                     VStack {
-                        // Top Section
+                        // Top Section (Top bar buttons & resolution info)
                         HStack {
-                            // Top Left: Immersive layout controls
                             HStack(spacing: 12) {
                                 Button(action: {
+                                    showLandscapeChannelList = false
+                                    showLandscapeSettings = false
                                     isLandscape = false
                                 }) {
                                     Image(systemName: "arrow.down.right.and.arrow.up.left")
-                                        .font(.system(size: 15, weight: .bold))
+                                        .font(.system(size: 14, weight: .bold))
                                         .foregroundColor(.white)
                                         .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.5))
+                                        .background(Color.black.opacity(0.45))
                                         .clipShape(Circle())
                                 }
                                 
                                 Button(action: {
+                                    showLandscapeChannelList = false
+                                    showLandscapeSettings = false
                                     closeSelectedChannel()
                                 }) {
                                     Image(systemName: "xmark")
-                                        .font(.system(size: 15, weight: .bold))
+                                        .font(.system(size: 14, weight: .bold))
                                         .foregroundColor(.red)
                                         .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.5))
+                                        .background(Color.black.opacity(0.45))
                                         .clipShape(Circle())
                                 }
                                 
                                 Button(action: { cycleAspect() }) {
                                     Image(systemName: "aspectratio")
-                                        .font(.system(size: 15, weight: .bold))
+                                        .font(.system(size: 14, weight: .bold))
                                         .foregroundColor(.white)
                                         .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.5))
+                                        .background(Color.black.opacity(0.45))
                                         .clipShape(Circle())
                                 }
                             }
                             
                             Spacer()
                             
-                            // Top Right: Stable Active Resolution and FPS indicator
-                            HStack {
+                            // Top Right: Active stable resolution
+                            HStack(spacing: 6) {
+                                Image(systemName: "bolt.horizontal.fill")
+                                    .foregroundColor(Color(hex: "007FFF"))
                                 Text(globalPlayerInfo.resolutionString)
                                     .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                    .foregroundColor(.green)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(Color.black.opacity(0.5))
-                                    .cornerRadius(8)
+                                    .foregroundColor(.white)
                             }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.black.opacity(0.55))
+                            .cornerRadius(8)
                         }
                         .padding(.horizontal, 40)
-                        .padding(.top, 20)
+                        .padding(.top, 24)
                         
                         Spacer()
                         
-                        // Center Play/Pause 
+                        // Center Section (Play / Pause button)
                         HStack {
                             Button(action: {
                                 if globalPlayerInfo.isPlaying {
@@ -1812,146 +1985,103 @@ struct ContentView: View {
                                 resetTimer()
                             }) {
                                 Image(systemName: globalPlayerInfo.isPlaying ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 44, weight: .bold))
+                                    .font(.system(size: 38, weight: .bold))
                                     .foregroundColor(.white)
-                                    .frame(width: 80, height: 80)
-                                    .background(Color.black.opacity(0.4))
+                                    .frame(width: 74, height: 74)
+                                    .background(Color.black.opacity(0.35))
                                     .clipShape(Circle())
+                                    .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
                             }
                         }
-
+                        
                         Spacer()
                         
-                        // Bottom Section
+                        // Bottom Section (Active TV information + action options)
                         HStack(alignment: .bottom) {
-                            // Bottom Left: Live badge + Channel info
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    // CANLI badge
-                                    HStack(spacing: 4) {
-                                        Circle().fill(Color.red).frame(width: 6, height: 6)
-                                        Text("CANLI")
-                                            .font(.system(size: 10, weight: .black))
-                                            .foregroundColor(.red)
-                                    }
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.black.opacity(0.5))
-                                    .cornerRadius(4)
-                                    
-                                    // Channel Name & fake EPG
-                                    Text(channel.name)
-                                        .font(.system(size: 16, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .lineLimit(1)
-                                    
-                                    Text(channel.safeGroup) // Using safeGroup as EPG placeholder
-                                        .font(.system(size: 14, weight: .regular))
-                                        .foregroundColor(.white.opacity(0.6))
-                                        .lineLimit(1)
+                            VStack(alignment: .leading, spacing: 4) {
+                                // Live Badge
+                                HStack(spacing: 4) {
+                                    Circle().fill(Color.red).frame(width: 6, height: 6)
+                                    Text("CANLI")
+                                        .font(.system(size: 9, weight: .black))
+                                        .foregroundColor(.red)
                                 }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.black.opacity(0.5))
+                                .cornerRadius(4)
+                                
+                                Text(channel.name)
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                
+                                Text(channel.safeGroup)
+                                    .font(.system(size: 13, weight: .regular))
+                                    .foregroundColor(.white.opacity(0.6))
+                                    .lineLimit(1)
                             }
                             
                             Spacer()
                             
-                            // Bottom Right: Actions
+                            // Bottom Action Options (Settings, Toggle Favourite, Channel Selector)
                             HStack(spacing: 12) {
                                 Button(action: {
-                                    // Settings toast feedback or action
+                                    withAnimation {
+                                        showLandscapeSettings.toggle()
+                                        showLandscapeChannelList = false
+                                    }
                                     resetTimer()
                                 }) {
                                     Image(systemName: "gearshape.fill")
-                                        .font(.system(size: 18, weight: .medium))
-                                        .foregroundColor(.white)
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(showLandscapeSettings ? Color(hex: "007FFF") : .white)
                                         .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.4))
+                                        .background(Color.black.opacity(0.45))
                                         .clipShape(Circle())
                                 }
-                                Button(action: { cycleAspect(); resetTimer() }) {
-                                    Image(systemName: "tv")
-                                        .font(.system(size: 18, weight: .medium))
-                                        .foregroundColor(.white)
-                                        .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.4))
-                                        .clipShape(Circle())
-                                }
+                                
                                 Button(action: {
                                     toggleFavourite(channel.url)
                                     resetTimer()
                                 }) {
                                     Image(systemName: favourites.contains(channel.url) ? "bookmark.fill" : "bookmark")
-                                        .font(.system(size: 18, weight: .medium))
+                                        .font(.system(size: 16, weight: .medium))
                                         .foregroundColor(favourites.contains(channel.url) ? .yellow : .white)
                                         .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.4))
+                                        .background(Color.black.opacity(0.45))
                                         .clipShape(Circle())
                                 }
+                                
                                 Button(action: {
                                     withAnimation {
                                         showLandscapeChannelList.toggle()
+                                        showLandscapeSettings = false
+                                        selectedLandscapeGroup = channel.safeGroup // auto select current group!
                                     }
                                     resetTimer()
                                 }) {
                                     Image(systemName: "list.bullet")
-                                        .font(.system(size: 18, weight: .medium))
+                                        .font(.system(size: 16, weight: .medium))
                                         .foregroundColor(showLandscapeChannelList ? Color(hex: "007FFF") : .white)
                                         .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.4))
+                                        .background(Color.black.opacity(0.45))
                                         .clipShape(Circle())
                                 }
                             }
                         }
                         .padding(.horizontal, 40)
-                        .padding(.bottom, 40)
+                        .padding(.bottom, 24)
                     }
-                    .zIndex(999)
+                    .zIndex(100)
                 }
                 
-                // Invisible Drag Gesture Areas for Brightness & Volume
-                HStack(spacing: 0) {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 10)
-                                .onChanged { value in
-                                    withAnimation { showBrightnessPill = true; showingControls = true; resetTimer() }
-                                    let delta = value.translation.height / -1000
-                                    brightnessLevel = max(0.0, min(1.0, brightnessLevel + delta))
-                                    UIScreen.main.brightness = brightnessLevel
-                                }
-                        )
-                    
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 10)
-                                .onChanged { value in
-                                    withAnimation { showVolumePill = true; showingControls = true; resetTimer() }
-                                }
-                        )
-                }
-                .zIndex(99)
-                
-                // Active indicators
-                if showBrightnessPill && showingControls {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Image(systemName: "sun.max.fill").foregroundColor(.white)
-                            ProgressView(value: brightnessLevel).progressViewStyle(LinearProgressViewStyle(tint: Color(hex: "6D28D9"))).frame(width: 100)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 40)
-                        .padding(.bottom, 40)
-                    }
-                }
-                
-                // Sliding Sidebar Channel Drawer (Glassmorphic)
+                // 6. Sliding Channels Drawer Sidebar (Glassmorphic)
                 if showLandscapeChannelList {
                     HStack(spacing: 0) {
                         Spacer()
                         
-                        VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 14) {
                             HStack {
                                 Text("Kanallar")
                                     .font(.system(size: 18, weight: .bold))
@@ -1970,10 +2100,49 @@ struct ContentView: View {
                             .padding(.horizontal, 16)
                             .padding(.top, 24)
                             
+                            // Category picker list of group pills
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    Button(action: {
+                                        selectedLandscapeGroup = "Tümü"
+                                        resetTimer()
+                                    }) {
+                                        Text("Tümü")
+                                            .font(.system(size: 11, weight: .bold))
+                                            .foregroundColor(selectedLandscapeGroup == "Tümü" ? .white : .white.opacity(0.6))
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(selectedLandscapeGroup == "Tümü" ? Color(hex: "007FFF") : Color.white.opacity(0.08))
+                                            .cornerRadius(12)
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    
+                                    let currentType = selectedChannel?.contentType ?? "live"
+                                    let landscapeGroups = Array(Set(channels.filter { $0.contentType == currentType }.map { $0.safeGroup })).sorted()
+                                    
+                                    ForEach(landscapeGroups, id: \.self) { grp in
+                                        Button(action: {
+                                            selectedLandscapeGroup = grp
+                                            resetTimer()
+                                        }) {
+                                            Text(grp)
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundColor(selectedLandscapeGroup == grp ? .white : .white.opacity(0.6))
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 6)
+                                                .background(selectedLandscapeGroup == grp ? Color(hex: "007FFF") : Color.white.opacity(0.08))
+                                                .cornerRadius(12)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                            }
+                            
                             HStack {
                                 Image(systemName: "magnifyingglass")
                                     .foregroundColor(.white.opacity(0.4))
-                                TextField("Ara...", text: $landscapeSearchQuery)
+                                TextField("", text: $landscapeSearchQuery, prompt: Text("Ara...").foregroundColor(.white.opacity(0.3)))
                                     .textFieldStyle(PlainTextFieldStyle())
                                     .foregroundColor(.white)
                                     .font(.system(size: 14))
@@ -2041,9 +2210,135 @@ struct ContentView: View {
                     }
                     .zIndex(1000)
                 }
+                
+                // 7. Sliding Settings Drawer Sidebar (Glassmorphic)
+                if showLandscapeSettings {
+                    HStack(spacing: 0) {
+                        Spacer()
+                        
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack {
+                                Text("Yayın Ayarları")
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundColor(.white)
+                                Spacer()
+                                Button(action: {
+                                    withAnimation {
+                                        showLandscapeSettings = false
+                                    }
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 22))
+                                        .foregroundColor(.white.opacity(0.5))
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 24)
+                            
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 20) {
+                                    // Aspect ratios
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Ekran Boyutu")
+                                            .font(.system(size: 14, weight: .bold))
+                                            .foregroundColor(.white.opacity(0.6))
+                                        
+                                        ForEach([UIView.ContentMode.scaleAspectFit, UIView.ContentMode.scaleAspectFill, UIView.ContentMode.scaleToFill], id: \.self) { mode in
+                                            Button(action: {
+                                                playerContentMode = mode
+                                                resetTimer()
+                                            }) {
+                                                HStack {
+                                                    Text(mode == .scaleAspectFit ? "Sığdır (Fit)" : (mode == .scaleAspectFill ? "Doldur (Fill)" : "Yay (Stretch)"))
+                                                        .font(.system(size: 13, weight: .medium))
+                                                        .foregroundColor(.white)
+                                                    Spacer()
+                                                    if playerContentMode == mode {
+                                                        Image(systemName: "checkmark.circle.fill")
+                                                            .foregroundColor(Color(hex: "007FFF"))
+                                                    }
+                                                }
+                                                .padding(12)
+                                                .background(Color.white.opacity(playerContentMode == mode ? 0.12 : 0.04))
+                                                .cornerRadius(8)
+                                            }
+                                        }
+                                    }
+                                    .padding(.horizontal, 16)
+                                    
+                                    // Connection Details info block
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text("Yayın Bilgileri")
+                                            .font(.system(size: 14, weight: .bold))
+                                            .foregroundColor(.white.opacity(0.6))
+                                        
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            HStack {
+                                                Text("Yayın Adı")
+                                                    .foregroundColor(.white.opacity(0.4))
+                                                Spacer()
+                                                Text(channel.name)
+                                                    .foregroundColor(.white)
+                                                    .font(.system(size: 12, weight: .bold))
+                                            }
+                                            HStack {
+                                                Text("Grup")
+                                                    .foregroundColor(.white.opacity(0.4))
+                                                Spacer()
+                                                Text(channel.safeGroup)
+                                                    .foregroundColor(.white)
+                                            }
+                                            HStack {
+                                                Text("Çözünürlük")
+                                                    .foregroundColor(.white.opacity(0.4))
+                                                Spacer()
+                                                Text(globalPlayerInfo.resolutionString)
+                                                    .foregroundColor(.green)
+                                            }
+                                        }
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .padding(12)
+                                        .background(Color.white.opacity(0.04))
+                                        .cornerRadius(8)
+                                    }
+                                    .padding(.horizontal, 16)
+                                    
+                                    // Refresh Stream Button
+                                    Button(action: {
+                                        let oldChan = channel
+                                        selectedChannel = nil
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                            selectedChannel = oldChan
+                                        }
+                                        showLandscapeSettings = false
+                                        resetTimer()
+                                    }) {
+                                        HStack {
+                                            Image(systemName: "arrow.clockwise")
+                                            Text("Yayını Yeniden Başlat")
+                                                .font(.system(size: 13, weight: .semibold))
+                                        }
+                                        .foregroundColor(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(Color.orange.opacity(0.2))
+                                        .cornerRadius(8)
+                                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.5), lineWidth: 1))
+                                    }
+                                    .padding(.horizontal, 16)
+                                }
+                            }
+                        }
+                        .frame(width: 300)
+                        .background(.ultraThinMaterial)
+                        .ignoresSafeArea()
+                        .transition(.move(edge: .trailing))
+                    }
+                    .zIndex(1000)
+                }
             } else {
-                 Color.black
-                 Text("Yatay tam ekran modunu kullanmak için lütfen önce bir yayın seçin.")
+                Color.black
+                Text("Yatay tam ekran modunu kullanmak için lütfen önce bir yayın seçin.")
                     .foregroundColor(.white.opacity(0.5))
                     .padding()
             }
@@ -2458,6 +2753,19 @@ struct ContentView: View {
         var baseList = channels
         
         // Match active section filter
+        if currentTab == .search {
+            if contentTypeFilter != "all" {
+                baseList = baseList.filter { $0.contentType == contentTypeFilter }
+            }
+            if !searchQuery.isEmpty {
+                let key = searchQuery.lowercased()
+                baseList = baseList.filter {
+                    $0.name.lowercased().contains(key) || $0.safeGroup.lowercased().contains(key)
+                }
+            }
+            return baseList
+        }
+        
         if selectedCategory != "Favoriler" {
             if contentTypeFilter != "all" {
                 baseList = baseList.filter { $0.contentType == contentTypeFilter }
@@ -2528,6 +2836,8 @@ struct ContentView: View {
         globalPlayerInfo.stop()
         selectedChannel = nil
         isLandscape = false
+        showLandscapeChannelList = false
+        showLandscapeSettings = false
     }
     
     // MARK: - Authentication Logouts
@@ -2873,12 +3183,34 @@ struct ContentView: View {
                     let nameLower = currentName.lowercased()
                     let contentType: String
                     
-                    let isVideoFile = clean.lowercased().hasSuffix(".mkv") || clean.lowercased().hasSuffix(".mp4") || clean.lowercased().hasSuffix(".avi") || clean.lowercased().hasSuffix(".mov") || clean.lowercased().contains("/movie/")
-                    let isLiveGroupWord = grpLower.contains("canli") || grpLower.contains("canlı") || grpLower.contains("tv") || grpLower.contains("hd") || grpLower.contains("yayin") || grpLower.contains("yayın") || grpLower.contains("haber") || grpLower.contains("spor") || grpLower.contains("sport") || grpLower.contains("ulusal")
+                    let isVideoFileSuf = clean.lowercased().hasSuffix(".mkv") || clean.lowercased().hasSuffix(".mp4") || clean.lowercased().hasSuffix(".avi") || clean.lowercased().hasSuffix(".mov") || clean.lowercased().hasSuffix(".m4v")
+                    let isXtreamMoviePath = clean.lowercased().contains("/movie/") || clean.lowercased().contains("/movies/")
+                    let isXtreamSeriesPath = clean.lowercased().contains("/series/")
                     
-                    if (grpLower.contains("dizi") || grpLower.contains("series") || grpLower.contains("sezon") || grpLower.contains("season")) && !isLiveGroupWord {
+                    let isLiveExtension = clean.lowercased().hasSuffix(".m3u8") || clean.lowercased().hasSuffix(".ts") || clean.lowercased().contains("/live/")
+                    
+                    let groupIsLive = grpLower.contains("canli") || grpLower.contains("canlı") || grpLower.contains("yayin") || grpLower.contains("yayın") || grpLower.contains("haber") || grpLower.contains("spor") || grpLower.contains("sport") || grpLower.contains("ulusal") || grpLower.contains("belgesel") || grpLower.contains("çocuk") || grpLower.contains("sinema tv") || grpLower.contains("sinematv")
+                    
+                    let groupIsMovie = grpLower.contains("film") || grpLower.contains("movie") || grpLower.contains("sinema") || grpLower.contains("vod") || grpLower.contains("cinema")
+                    let groupIsSeries = grpLower.contains("dizi") || grpLower.contains("series") || grpLower.contains("sezon") || grpLower.contains("season")
+                    
+                    let nameIsMovie = nameLower.contains("film:") || nameLower.contains("sinema:")
+                    
+                    if isXtreamSeriesPath {
                         contentType = "series"
-                    } else if (isVideoFile || grpLower.contains("film") || grpLower.contains("movie") || grpLower.contains("sinema") || grpLower.contains("vod") || grpLower.contains("cinema") || nameLower.contains("film:") || nameLower.contains("sinema:")) && !isLiveGroupWord {
+                    } else if isXtreamMoviePath {
+                        contentType = "movie"
+                    } else if isVideoFileSuf {
+                        if groupIsSeries {
+                            contentType = "series"
+                        } else {
+                            contentType = "movie"
+                        }
+                    } else if isLiveExtension {
+                        contentType = "live"
+                    } else if groupIsSeries && !groupIsLive {
+                        contentType = "series"
+                    } else if (groupIsMovie || nameIsMovie) && !groupIsLive && !grpLower.contains("sinema tv") && !grpLower.contains("sinematv") {
                         contentType = "movie"
                     } else {
                         contentType = "live"
@@ -2954,12 +3286,34 @@ struct ContentView: View {
                     let nameLower = currentName.lowercased()
                     let contentType: String
                     
-                    let isVideoFile = clean.lowercased().hasSuffix(".mkv") || clean.lowercased().hasSuffix(".mp4") || clean.lowercased().hasSuffix(".avi") || clean.lowercased().hasSuffix(".mov") || clean.lowercased().contains("/movie/")
-                    let isLiveGroupWord = grpLower.contains("canli") || grpLower.contains("canlı") || grpLower.contains("tv") || grpLower.contains("hd") || grpLower.contains("yayin") || grpLower.contains("yayın") || grpLower.contains("haber") || grpLower.contains("spor") || grpLower.contains("sport") || grpLower.contains("ulusal")
+                    let isVideoFileSuf = clean.lowercased().hasSuffix(".mkv") || clean.lowercased().hasSuffix(".mp4") || clean.lowercased().hasSuffix(".avi") || clean.lowercased().hasSuffix(".mov") || clean.lowercased().hasSuffix(".m4v")
+                    let isXtreamMoviePath = clean.lowercased().contains("/movie/") || clean.lowercased().contains("/movies/")
+                    let isXtreamSeriesPath = clean.lowercased().contains("/series/")
                     
-                    if (grpLower.contains("dizi") || grpLower.contains("series") || grpLower.contains("sezon") || grpLower.contains("season")) && !isLiveGroupWord {
+                    let isLiveExtension = clean.lowercased().hasSuffix(".m3u8") || clean.lowercased().hasSuffix(".ts") || clean.lowercased().contains("/live/")
+                    
+                    let groupIsLive = grpLower.contains("canli") || grpLower.contains("canlı") || grpLower.contains("yayin") || grpLower.contains("yayın") || grpLower.contains("haber") || grpLower.contains("spor") || grpLower.contains("sport") || grpLower.contains("ulusal") || grpLower.contains("belgesel") || grpLower.contains("çocuk") || grpLower.contains("sinema tv") || grpLower.contains("sinematv")
+                    
+                    let groupIsMovie = grpLower.contains("film") || grpLower.contains("movie") || grpLower.contains("sinema") || grpLower.contains("vod") || grpLower.contains("cinema")
+                    let groupIsSeries = grpLower.contains("dizi") || grpLower.contains("series") || grpLower.contains("sezon") || grpLower.contains("season")
+                    
+                    let nameIsMovie = nameLower.contains("film:") || nameLower.contains("sinema:")
+                    
+                    if isXtreamSeriesPath {
                         contentType = "series"
-                    } else if (isVideoFile || grpLower.contains("film") || grpLower.contains("movie") || grpLower.contains("sinema") || grpLower.contains("vod") || grpLower.contains("cinema") || nameLower.contains("film:") || nameLower.contains("sinema:")) && !isLiveGroupWord {
+                    } else if isXtreamMoviePath {
+                        contentType = "movie"
+                    } else if isVideoFileSuf {
+                        if groupIsSeries {
+                            contentType = "series"
+                        } else {
+                            contentType = "movie"
+                        }
+                    } else if isLiveExtension {
+                        contentType = "live"
+                    } else if groupIsSeries && !groupIsLive {
+                        contentType = "series"
+                    } else if (groupIsMovie || nameIsMovie) && !groupIsLive && !grpLower.contains("sinema tv") && !grpLower.contains("sinematv") {
                         contentType = "movie"
                     } else {
                         contentType = "live"
