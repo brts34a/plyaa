@@ -219,19 +219,11 @@ class PlayerInfoManager: ObservableObject {
     func start(player ksPlayer: IOSVideoPlayerView? = nil) {
         self.ksPlayer = ksPlayer
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            self?.update()
-        }
         userTapped()
     }
     
     func update() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            if self.ksPlayer != nil {
-                self.resolutionString = "1080p"
-            }
-        }
+        // No-op or removed, keeping definition empty if it's called elsewhere
     }
     
     func togglePlayPause() {
@@ -248,7 +240,7 @@ class PlayerInfoManager: ObservableObject {
     
     func seek(to seconds: Double) {
         if let ks = ksPlayer {
-            ks.player?.seek(time: seconds) { _ in }
+            ks.seek(time: seconds) { _ in }
             self.currentTime = seconds
         }
     }
@@ -256,7 +248,7 @@ class PlayerInfoManager: ObservableObject {
     func scrubValueUpdated(to seconds: Double) {
         scrubbingTime = seconds
         if let ks = ksPlayer {
-            ks.player?.seek(time: seconds) { _ in }
+            ks.seek(time: seconds) { _ in }
         }
     }
     
@@ -267,7 +259,7 @@ class PlayerInfoManager: ObservableObject {
             return
         }
         if let ks = ksPlayer {
-            ks.player?.seek(time: seconds) { [weak self] _ in
+            ks.seek(time: seconds) { [weak self] _ in
                 DispatchQueue.main.async {
                     self?.currentTime = seconds
                     self?.isScrubbing = false
@@ -351,25 +343,27 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         var currentUrl: String = ""
         var containerView: PlayerContainerView?
         weak var infoManager: PlayerInfoManager?
+        var isLive: Bool
         
-        init(infoManager: PlayerInfoManager) {
+        init(infoManager: PlayerInfoManager, isLive: Bool = false) {
             self.infoManager = infoManager
+            self.isLive = isLive
             super.init()
         }
         
-        func playerView(playerView: IOSVideoPlayerView, state: KSPlayerState) {
+        func playerController(state: KSPlayerState) {
             DispatchQueue.main.async { [weak self] in
                 guard let self = self, let infoManager = self.infoManager else { return }
                 switch state {
                 case .preparing:
                     infoManager.resolutionString = "Yükleniyor..."
                 case .readyToPlay:
-                    infoManager.resolutionString = infoManager.ksPlayer?.player?.isLive == true ? "1080p (Canlı)" : "1080p"
+                    infoManager.resolutionString = self.isLive ? "1080p (Canlı)" : "1080p"
                     infoManager.isPlaying = true
                 case .buffering:
                     infoManager.resolutionString = "Ara Bellek..."
                 case .bufferFinished:
-                    infoManager.resolutionString = infoManager.ksPlayer?.player?.isLive == true ? "1080p (Canlı)" : "1080p"
+                    infoManager.resolutionString = self.isLive ? "1080p (Canlı)" : "1080p"
                     infoManager.isPlaying = true
                 case .playedToTheEnd:
                     infoManager.isPlaying = false
@@ -381,7 +375,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             }
         }
         
-        func playerView(playerView: IOSVideoPlayerView, currentTime: TimeInterval, totalTime: TimeInterval) {
+        func playerController(currentTime: TimeInterval, totalTime: TimeInterval) {
             DispatchQueue.main.async { [weak self] in
                 guard let self = self, let infoManager = self.infoManager else { return }
                 if !infoManager.isScrubbing {
@@ -392,10 +386,16 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 }
             }
         }
+        
+        func playerController(finish error: Error?) {}
+        func playerController(maskShow: Bool) {}
+        func playerController(action: PlayerButtonType) {}
+        func playerController(bufferedCount: Int, consumeTime: TimeInterval) {}
+        func playerController(seek: TimeInterval) {}
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator(infoManager: infoManager)
+        Coordinator(infoManager: infoManager, isLive: isLive)
     }
     
     func makeUIView(context: Context) -> PlayerContainerView {
