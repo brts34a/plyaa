@@ -3798,13 +3798,9 @@ struct ContentView: View {
                 self.loadingMessage = "Canlı kanallar eşitleniyor..."
             }
             
-            let streamGroup = DispatchGroup()
-            
             // 4. Fetch Live streams
-            streamGroup.enter()
             URLSession.shared.dataTask(with: liveStreamsUrl) { data, _, err in
-                defer { streamGroup.leave() }
-                if let err = err { internalError = err.localizedDescription; return }
+                if let err = err { internalError = err.localizedDescription }
                 if let data = data, let rawStreams = try? JSONDecoder().decode([SafeDecodable<XtreamStream>].self, from: data) {
                     let streams = rawStreams.compactMap { $0.value }
                     for s in streams {
@@ -3819,21 +3815,19 @@ struct ContentView: View {
                         fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "live"))
                     }
                 }
-            }.resume()
-            
-            // 5. Fetch Movie streams
-            streamGroup.enter()
-            URLSession.shared.dataTask(with: vodStreamsUrl) { data, _, _ in
-                defer { streamGroup.leave() }
+                
                 DispatchQueue.main.async {
                     self.loadStep2 = true
                     self.loadStep3 = false
                     self.loadingMessage = "Filmler eşitleniyor..."
                 }
-                struct XtreamMovie: Codable {
-                    let name: String?
-                    let stream_name: String?
-                    let stream_id: SafeStringOrInt?
+                
+                // 5. Fetch Movie streams
+                URLSession.shared.dataTask(with: vodStreamsUrl) { data, _, _ in
+                    struct XtreamMovie: Codable {
+                        let name: String?
+                        let stream_name: String?
+                        let stream_id: SafeStringOrInt?
                     let stream_icon: String?
                     let category_id: SafeStringOrInt?
                     let container_extension: String?
@@ -3853,22 +3847,24 @@ struct ContentView: View {
                         fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "movie", added: s.added?.intValue ?? 0))
                     }
                 }
-            }.resume()
-            
-            // 6. Fetch Series streams
-            streamGroup.enter()
-            URLSession.shared.dataTask(with: seriesStreamsUrl) { data, _, _ in
-                defer {
+                
+                DispatchQueue.main.async {
+                    self.loadStep3 = true
+                    self.loadStep4 = false
+                    self.loadingMessage = "Diziler eşitleniyor..."
+                }
+                
+                // 6. Fetch Series streams
+                URLSession.shared.dataTask(with: seriesStreamsUrl) { data, _, _ in
                     DispatchQueue.main.async {
                         self.loadStep4 = true
                         self.loadStep5 = false
                         self.loadingMessage = "İçerik eşleştiriliyor..."
                     }
-                    streamGroup.leave()
-                }
-                struct XtreamSeries: Codable {
-                    let name: String?
-                    let stream_name: String?
+                    
+                    struct XtreamSeries: Codable {
+                        let name: String?
+                        let stream_name: String?
                     let series_id: SafeStringOrInt?
                     let cover: String?
                     let category_id: SafeStringOrInt?
@@ -3887,26 +3883,25 @@ struct ContentView: View {
                         fetchedChannels.append(Channel(name: name, logo: s.cover ?? "", group: grp, url: url, contentType: "series", added: s.last_modified?.intValue ?? 0))
                     }
                 }
-            }.resume()
-            
-            streamGroup.notify(queue: .main) {
-                self.sheetIsLoading = false
                 
-                if fetchedChannels.isEmpty {
-                    self.showSyncOverlay = false
-                    self.isLoading = false
-                    self.showAccountsSheet = true
-                    self.sheetError = internalError ?? "Girilen bilgilerle aktif bir yayın listesine ulaşılamadı. Lütfen sunucu durumunu veya bilgilerinizi kontrol edin."
-                } else {
-                    self.channels = fetchedChannels
-                    self.xtreamHost = cleanHost
-                    self.xtreamUser = user
-                    self.xtreamPass = pass
+                DispatchQueue.main.async {
+                    self.sheetIsLoading = false
                     
-                    let hostName = URL(string: cleanHost)?.host ?? cleanHost
-                    let accountName = "\(user)@\(hostName)"
-                    let newAccountId = UUID()
-                    let newAcc = IPTVAccount(id: newAccountId, name: accountName, mode: 1, xtreamHost: cleanHost, xtreamUser: user, xtreamPass: pass)
+                    if fetchedChannels.isEmpty {
+                        self.showSyncOverlay = false
+                        self.isLoading = false
+                        self.showAccountsSheet = true
+                        self.sheetError = internalError ?? "Girilen bilgilerle aktif bir yayın listesine ulaşılamadı. Lütfen sunucu durumunu veya bilgilerinizi kontrol edin."
+                    } else {
+                        self.channels = fetchedChannels
+                        self.xtreamHost = cleanHost
+                        self.xtreamUser = user
+                        self.xtreamPass = pass
+                        
+                        let hostName = URL(string: cleanHost)?.host ?? cleanHost
+                        let accountName = "\(user)@\(hostName)"
+                        let newAccountId = UUID()
+                        let newAcc = IPTVAccount(id: newAccountId, name: accountName, mode: 1, xtreamHost: cleanHost, xtreamUser: user, xtreamPass: pass)
                     
                     if !self.accounts.contains(where: { $0.xtreamHost == cleanHost && $0.xtreamUser == user }) {
                         self.accounts.append(newAcc)
@@ -3931,14 +3926,25 @@ struct ContentView: View {
                             withAnimation {
                                 self.loadStepFinished = true
                             }
+                            
+                            UniqueChannelsCache.clear()
+                            EPGManager.shared.fetchEPG(for: newAcc)
+                            
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                self.showSyncOverlay = false
+                                self.isLoading = false
+                                self.isInitializingChannels = false
+                            }
                         }
                     }
                 }
             }
-        }
-    }
-    
-    // MARK: - Legacy direct API fetch handler
+        }.resume()
+    }.resume()
+}.resume()
+}
+
+// MARK: - Legacy direct API fetch handler
     func fetchXtreamData(host: String, user: String, pass: String) {
         var cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
         if !cleanHost.lowercased().hasPrefix("http://") && !cleanHost.lowercased().hasPrefix("https://") {
