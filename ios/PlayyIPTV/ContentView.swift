@@ -67,10 +67,10 @@ struct Channel: Identifiable, Codable, Hashable {
     let url: String
     var contentType: String = "live" // "live", "movie", "series"
     var added: Int? = 0
-    var streamId: String? = nil
+    var customStreamId: String? = nil
     
     enum CodingKeys: String, CodingKey {
-        case id, name, logo, group, url, contentType, added, streamId
+        case id, name, logo, group, url, contentType, added, customStreamId = "streamId"
     }
     
     init(name: String, logo: String, group: String, url: String, contentType: String = "live", added: Int? = 0, streamId: String? = nil) {
@@ -81,7 +81,7 @@ struct Channel: Identifiable, Codable, Hashable {
         self.url = url
         self.contentType = contentType
         self.added = added ?? 0
-        self.streamId = streamId
+        self.customStreamId = streamId
     }
     
     init(from decoder: Decoder) throws {
@@ -93,7 +93,20 @@ struct Channel: Identifiable, Codable, Hashable {
         self.url = try container.decode(String.self, forKey: .url)
         self.contentType = try container.decodeIfPresent(String.self, forKey: .contentType) ?? "live"
         self.added = try container.decodeIfPresent(Int.self, forKey: .added) ?? 0
-        self.streamId = try container.decodeIfPresent(String.self, forKey: .streamId)
+        self.customStreamId = try container.decodeIfPresent(String.self, forKey: .customStreamId)
+    }
+    
+    var streamId: String? {
+        if let explicitId = customStreamId { return explicitId }
+        guard contentType == "live" else { return nil }
+        let parts = url.components(separatedBy: "/")
+        if parts.count >= 4, let last = parts.last {
+            if let dotIndex = last.firstIndex(of: ".") {
+                return String(last[..<dotIndex])
+            }
+            return last
+        }
+        return nil
     }
     
     func encode(to encoder: Encoder) throws {
@@ -5650,19 +5663,6 @@ class XMLTVParser: NSObject, XMLParserDelegate {
 }
 
 // Helper extensıons to extract streamId for Xtream matching and decode base64
-extension Channel {
-    var streamId: String? {
-        guard contentType == "live" else { return nil }
-        let parts = url.components(separatedBy: "/")
-        if parts.count >= 4, let last = parts.last {
-            if let dotIndex = last.firstIndex(of: ".") {
-                return String(last[..<dotIndex])
-            }
-            return last
-        }
-        return nil
-    }
-}
 
 extension String {
     func decodeBase64IfNeeded() -> String {
