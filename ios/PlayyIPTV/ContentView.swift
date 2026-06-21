@@ -65,6 +65,43 @@ struct Channel: Identifiable, Codable, Hashable {
     let group: String
     let url: String
     var contentType: String = "live" // "live", "movie", "series"
+    var added: Int? = 0
+    
+    enum CodingKeys: String, CodingKey {
+        case id, name, logo, group, url, contentType, added
+    }
+    
+    init(name: String, logo: String, group: String, url: String, contentType: String = "live", added: Int? = 0) {
+        self.id = UUID()
+        self.name = name
+        self.logo = logo
+        self.group = group
+        self.url = url
+        self.contentType = contentType
+        self.added = added ?? 0
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        self.name = try container.decode(String.self, forKey: .name)
+        self.logo = try container.decode(String.self, forKey: .logo)
+        self.group = try container.decode(String.self, forKey: .group)
+        self.url = try container.decode(String.self, forKey: .url)
+        self.contentType = try container.decodeIfPresent(String.self, forKey: .contentType) ?? "live"
+        self.added = try container.decodeIfPresent(Int.self, forKey: .added) ?? 0
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(logo, forKey: .logo)
+        try container.encode(group, forKey: .group)
+        try container.encode(url, forKey: .url)
+        try container.encode(contentType, forKey: .contentType)
+        try container.encode(added, forKey: .added)
+    }
     
     var safeGroup: String {
         let g = group.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1123,7 +1160,7 @@ struct ContentView: View {
                         libraryHorizontalRankedSection(title: "Öne çıkan diziler", items: featuredSeries)
                     }
                     
-                    let recentMovies = getUniqueChannels(type: "movie", limit: 15, reversed: true)
+                    let recentMovies = getUniqueChannels(type: "movie", limit: 15, reversed: true, sortByRecent: true)
                     
                     if !recentMovies.isEmpty {
                         libraryHorizontalPortraitSection(title: "Son eklenen filmler", items: recentMovies)
@@ -1540,7 +1577,7 @@ struct ContentView: View {
              
              ScrollView(.horizontal, showsIndicators: false) {
                  HStack(spacing: 12) {
-                     let items = getUniqueChannels(type: type, limit: 15, reversed: type == "series")
+                     let items = getUniqueChannels(type: type, limit: 15, reversed: type == "series", sortByRecent: title.localizedCaseInsensitiveContains("son eklenenler") || title.localizedCaseInsensitiveContains("yeni"))
                      ForEach(items) { channel in
                          Button(action: { selectedChannel = channel }) {
                              VStack(alignment: .leading, spacing: 8) {
@@ -1684,33 +1721,62 @@ struct ContentView: View {
             str.removeSubrange(left...right)
         }
         
+        // Replace punctuation/hyphens with space to separate tokens cleanly
+        str = str.replacingOccurrences(of: "-", with: " ")
+        str = str.replacingOccurrences(of: "_", with: " ")
+        str = str.replacingOccurrences(of: ".", with: " ")
+        
         // Split title into tokens using non-alphanumeric boundaries
         let tokens = str.components(separatedBy: CharacterSet.alphanumerics.inverted)
         
         let unwantedTags: Set<String> = [
             "1080p", "720p", "4k", "2160p", "uhd", "hd", "sd", "web-dl", "webdl", "bluray", "brrip",
             "tr", "en", "fra", "ger", "dublaj", "alt", "altyazili", "altyazılı", "altyazı", "turkce", "türkçe",
-            "dual", "ses", "org", "orjinal", "orj", "filmi", "sinema", "dizisi", "h264", "h265", "hevc", "x264", "x265"
+            "dual", "ses", "org", "orjinal", "orj", "filmi", "sinema", "dizisi", "h264", "h265", "hevc", "x264", "x265",
+            "3d", "web", "rip", "mkv", "mp4", "avi"
         ]
         
-        let filteredTokens = tokens.filter { token in
+        var filteredTokens = [String]()
+        for token in tokens {
             let cleanToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-            if cleanToken.isEmpty { return false }
-            return !unwantedTags.contains(cleanToken)
+            if cleanToken.isEmpty { continue }
+            if unwantedTags.contains(cleanToken) { continue }
+            
+            // Exclude season patterns: s01, s1, e01, e1, s01e01, etc.
+            let isSeasonEpisode = cleanToken.range(of: "^s\\d+$", options: .regularExpression) != nil ||
+                                  cleanToken.range(of: "^e\\d+$", options: .regularExpression) != nil ||
+                                  cleanToken.range(of: "^s\\d+e\\d+$", options: .regularExpression) != nil ||
+                                  cleanToken.range(of: "^yeni$", options: .regularExpression) != nil ||
+                                  cleanToken == "seasons" || cleanToken == "season" || cleanToken == "sezon" ||
+                                  cleanToken == "bölüm" || cleanToken == "bolum" || cleanToken == "bölümü" || cleanToken == "bolumu" ||
+                                  cleanToken == "episode" || cleanToken == "ep" || cleanToken == "part"
+            
+            if isSeasonEpisode { continue }
+            filteredTokens.append(cleanToken)
         }
         
         let finalTitle = filteredTokens.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         return finalTitle.isEmpty ? title.lowercased() : finalTitle
     }
 
-    func getUniqueChannels(type: String, limit: Int, reversed: Bool) -> [Channel] {
+    func getUniqueChannels(type: String, limit: Int, reversed: Bool, sortByRecent: Bool = false) -> [Channel] {
         var list = [Channel]()
         var seenNames = Set<String>()
         var seenUrls = Set<String>()
-        let filtered = channels.filter { $0.contentType == type }
-        let iterator = reversed ? AnySequence(filtered.reversed()) : AnySequence(filtered)
+        var filtered = channels.filter { $0.contentType == type }
         
-        for ch in iterator {
+        if sortByRecent {
+            let hasAddedTimestamps = filtered.contains { ($0.added ?? 0) > 0 }
+            if hasAddedTimestamps {
+                filtered.sort { ($0.added ?? 0) > ($1.added ?? 0) }
+            } else {
+                filtered = filtered.reversed()
+            }
+        } else if reversed {
+            filtered = filtered.reversed()
+        }
+        
+        for ch in filtered {
             let clearedName = cleanTitle(ch.name)
             let normalizedUrl = ch.url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             if !seenNames.contains(clearedName) && !seenUrls.contains(normalizedUrl) {
@@ -1804,16 +1870,25 @@ struct ContentView: View {
                         }
                     }
                 
-                // 3. Left/Right Gestures for Brightness/Volume (on top of player, but below actual action overlays)
+                // 3. Left/Right Gestures for Brightness/Volume (elevated above black overlay to prevent cancelation/block of drag event)
                 GeometryReader { geo in
                     HStack(spacing: 0) {
                         // Left 22% area: Brightness drag
                         Color.black.opacity(0.005)
                             .frame(width: geo.size.width * 0.22)
                             .contentShape(Rectangle())
+                            .onTapGesture {
+                                withAnimation {
+                                    showingControls.toggle()
+                                }
+                                if showingControls {
+                                    resetTimer()
+                                }
+                            }
                             .gesture(
                                 DragGesture(minimumDistance: 10)
                                     .onChanged { value in
+                                        if showLandscapeChannelList || showLandscapeSettings { return }
                                         if !showBrightnessPill {
                                             dragStartBrightness = brightnessLevel
                                         }
@@ -1841,9 +1916,18 @@ struct ContentView: View {
                         Color.black.opacity(0.005)
                             .frame(width: geo.size.width * 0.22)
                             .contentShape(Rectangle())
+                            .onTapGesture {
+                                withAnimation {
+                                    showingControls.toggle()
+                                }
+                                if showingControls {
+                                    resetTimer()
+                                }
+                            }
                             .gesture(
                                 DragGesture(minimumDistance: 10)
                                     .onChanged { value in
+                                        if showLandscapeChannelList || showLandscapeSettings { return }
                                         if !showVolumePill {
                                             dragStartVolume = volumeLevel
                                         }
@@ -1866,7 +1950,7 @@ struct ContentView: View {
                     }
                 }
                 .ignoresSafeArea()
-                .zIndex(15)
+                .zIndex(150)
                 
                 // 4. Vertical Sliding Indicators (Left: Brightness, Right: Volume)
                 HStack {
@@ -3561,6 +3645,7 @@ struct ContentView: View {
                     let stream_icon: String?
                     let category_id: SafeStringOrInt?
                     let container_extension: String?
+                    let added: SafeStringOrInt?
                 }
                 if let data = data, let rawStreams = try? JSONDecoder().decode([SafeDecodable<XtreamMovie>].self, from: data) {
                     let streams = rawStreams.compactMap { $0.value }
@@ -3573,7 +3658,7 @@ struct ContentView: View {
                         let grp = fetchedCategories["movie_" + catIdStr] ?? "Sinema"
                         let ext = s.container_extension ?? "mp4"
                         let url = "\(cleanHost)/movie/\(user)/\(pass)/\(sId).\(ext)"
-                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "movie"))
+                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "movie", added: s.added?.intValue ?? 0))
                     }
                 }
             }.resume()
@@ -3595,6 +3680,7 @@ struct ContentView: View {
                     let series_id: SafeStringOrInt?
                     let cover: String?
                     let category_id: SafeStringOrInt?
+                    let last_modified: SafeStringOrInt?
                 }
                 if let data = data, let rawStreams = try? JSONDecoder().decode([SafeDecodable<XtreamSeries>].self, from: data) {
                     let streams = rawStreams.compactMap { $0.value }
@@ -3606,7 +3692,7 @@ struct ContentView: View {
                         let catIdStr = s.category_id?.stringValue ?? ""
                         let grp = fetchedCategories["series_" + catIdStr] ?? "Diziler"
                         let url = "\(cleanHost)/series/\(user)/\(pass)/\(sId).mp4"
-                        fetchedChannels.append(Channel(name: name, logo: s.cover ?? "", group: grp, url: url, contentType: "series"))
+                        fetchedChannels.append(Channel(name: name, logo: s.cover ?? "", group: grp, url: url, contentType: "series", added: s.last_modified?.intValue ?? 0))
                     }
                 }
             }.resume()
@@ -3756,6 +3842,7 @@ struct ContentView: View {
                     let stream_icon: String?
                     let category_id: SafeStringOrInt?
                     let container_extension: String?
+                    let added: SafeStringOrInt?
                 }
                 if let data = data, let rawStreams = try? JSONDecoder().decode([SafeDecodable<XtreamMovieSilent>].self, from: data) {
                     let streams = rawStreams.compactMap { $0.value }
@@ -3768,7 +3855,7 @@ struct ContentView: View {
                         let grp = fetchedCategories["movie_" + catIdStr] ?? "Sinema"
                         let ext = s.container_extension ?? "mp4"
                         let url = "\(cleanHost)/movie/\(user)/\(pass)/\(sId).\(ext)"
-                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "movie"))
+                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "movie", added: s.added?.intValue ?? 0))
                     }
                 }
             }.resume()
@@ -3783,6 +3870,7 @@ struct ContentView: View {
                     let series_id: SafeStringOrInt?
                     let cover: String?
                     let category_id: SafeStringOrInt?
+                    let last_modified: SafeStringOrInt?
                 }
                 if let data = data, let rawStreams = try? JSONDecoder().decode([SafeDecodable<XtreamSeriesSilent>].self, from: data) {
                     let streams = rawStreams.compactMap { $0.value }
@@ -3794,7 +3882,7 @@ struct ContentView: View {
                         let catIdStr = s.category_id?.stringValue ?? ""
                         let grp = fetchedCategories["series_" + catIdStr] ?? "Diziler"
                         let url = "\(cleanHost)/series/\(user)/\(pass)/\(sId).mp4"
-                        fetchedChannels.append(Channel(name: name, logo: s.cover ?? "", group: grp, url: url, contentType: "series"))
+                        fetchedChannels.append(Channel(name: name, logo: s.cover ?? "", group: grp, url: url, contentType: "series", added: s.last_modified?.intValue ?? 0))
                     }
                 }
             }.resume()
