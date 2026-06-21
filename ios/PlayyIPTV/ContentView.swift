@@ -375,7 +375,16 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 let headers: [String: String] = ["User-Agent": "VLC/3.0.18 LibVLC/3.0.18"]
                 let asset = AVURLAsset(url: targetUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
                 let item = AVPlayerItem(asset: asset)
+                
+                // Advanced live IPTV buffering and anti-stutter optimizations
+                item.preferredForwardBufferDuration = 6.0 // Keeps 6s buffer ahead of playing to absorb network drops
+                item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
+                if #available(iOS 15.0, *) {
+                    item.preferredConfiguredForLowLatencyLeaveLiveStreamThreshold = 2.0
+                }
+                
                 let player = AVPlayer(playerItem: item)
+                player.automaticallyWaitsToMinimizeStalling = true // Waits gracefully for dynamic buffers to minimize stalling
                 uiView.player = player
                 context.coordinator.player = player
                 
@@ -2157,165 +2166,170 @@ struct ContentView: View {
                     .allowsHitTesting(false) // Let touches pass through to gesture overlay
                     .zIndex(90)
                     
-                    VStack {
-                        // Top Section (Top bar buttons & resolution info)
-                        HStack {
-                            HStack(spacing: 12) {
-                                Button(action: {
-                                    showLandscapeChannelList = false
-                                    showLandscapeSettings = false
-                                    isLandscape = false
-                                }) {
-                                    Image(systemName: "arrow.down.right.and.arrow.up.left")
-                                        .font(.system(size: 14, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .frame(width: 44, height: 44)
-                                        .background(.ultraThinMaterial)
-                                        .environment(\.colorScheme, .dark)
-                                        .clipShape(Circle())
-                                }
-                                
-                                Button(action: {
-                                    showLandscapeChannelList = false
-                                    showLandscapeSettings = false
-                                    closeSelectedChannel()
-                                }) {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 14, weight: .bold))
-                                        .foregroundColor(.red)
-                                        .frame(width: 44, height: 44)
-                                        .background(.ultraThinMaterial)
-                                        .environment(\.colorScheme, .dark)
-                                        .clipShape(Circle())
-                                }
-                                
-                                Button(action: { cycleAspect() }) {
-                                    Image(systemName: "aspectratio")
-                                        .font(.system(size: 14, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .frame(width: 44, height: 44)
-                                        .background(.ultraThinMaterial)
-                                        .environment(\.colorScheme, .dark)
-                                        .clipShape(Circle())
-                                }
-                            }
-                            
-                            Spacer()
-                            
-                            // Top Right: Active stable resolution
-                            HStack(spacing: 6) {
-                                Image(systemName: "bolt.horizontal.fill")
-                                    .foregroundColor(Color(hex: "007FFF"))
-                                Text(globalPlayerInfo.resolutionString)
-                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                    .foregroundColor(.white)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(.ultraThinMaterial)
-                            .environment(\.colorScheme, .dark)
-                            .cornerRadius(8)
-                        }
-                        .padding(.horizontal, 40)
-                        .padding(.top, 24)
+                    GeometryReader { controlGeo in
+                        let isWide = controlGeo.size.width > controlGeo.size.height
                         
-                        Spacer()
-                        
-                        // Center Section (Play / Pause button)
-                        HStack {
-                            Button(action: {
-                                globalPlayerInfo.togglePlayPause()
-                                resetTimer()
-                            }) {
-                                Image(systemName: globalPlayerInfo.isPlaying ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 38, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .frame(width: 74, height: 74)
-                                    .background(.ultraThinMaterial)
-                                    .environment(\.colorScheme, .dark)
-                                    .clipShape(Circle())
-                                    .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
-                            }
-                        }
-                        
-                        Spacer()
-                        
-                        // Bottom Section (Active TV information + action options)
-                        HStack(alignment: .bottom) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                // Live Badge
-                                HStack(spacing: 4) {
-                                    Circle().fill(Color.red).frame(width: 6, height: 6)
-                                    Text("CANLI")
-                                        .font(.system(size: 9, weight: .black))
-                                        .foregroundColor(.red)
-                                }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.black.opacity(0.5))
-                                .cornerRadius(4)
-                                
-                                Text(channel.name)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .lineLimit(1)
-                                
-                                Text(channel.safeGroup)
-                                    .font(.system(size: 13, weight: .regular))
-                                    .foregroundColor(.white.opacity(0.6))
-                                    .lineLimit(1)
-                            }
-                            
-                            Spacer()
-                            
-                            // Bottom Action Options (Settings, Toggle Favourite, Channel Selector)
-                            HStack(spacing: 12) {
-                                Button(action: {
-                                    withAnimation {
-                                        showLandscapeSettings.toggle()
+                        VStack {
+                            // Top Section (Top bar buttons & resolution info)
+                            HStack {
+                                HStack(spacing: 12) {
+                                    Button(action: {
                                         showLandscapeChannelList = false
-                                    }
-                                    resetTimer()
-                                }) {
-                                    Image(systemName: "gearshape.fill")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(showLandscapeSettings ? Color(hex: "007FFF") : .white)
-                                        .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.45))
-                                        .clipShape(Circle())
-                                }
-                                
-                                Button(action: {
-                                    toggleFavourite(channel.url)
-                                    resetTimer()
-                                }) {
-                                    Image(systemName: favourites.contains(channel.url) ? "bookmark.fill" : "bookmark")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(favourites.contains(channel.url) ? .yellow : .white)
-                                        .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.45))
-                                        .clipShape(Circle())
-                                }
-                                
-                                Button(action: {
-                                    withAnimation {
-                                        showLandscapeChannelList.toggle()
                                         showLandscapeSettings = false
-                                        selectedLandscapeGroup = channel.safeGroup // auto select current group!
+                                        isLandscape = false
+                                    }) {
+                                        Image(systemName: "arrow.down.right.and.arrow.up.left")
+                                            .font(.system(size: 14, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .frame(width: 44, height: 44)
+                                            .background(.ultraThinMaterial)
+                                            .environment(\.colorScheme, .dark)
+                                            .clipShape(Circle())
                                     }
+                                    
+                                    Button(action: {
+                                        showLandscapeChannelList = false
+                                        showLandscapeSettings = false
+                                        closeSelectedChannel()
+                                    }) {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 14, weight: .bold))
+                                            .foregroundColor(.red)
+                                            .frame(width: 44, height: 44)
+                                            .background(.ultraThinMaterial)
+                                            .environment(\.colorScheme, .dark)
+                                            .clipShape(Circle())
+                                    }
+                                    
+                                    Button(action: { cycleAspect() }) {
+                                        Image(systemName: "aspectratio")
+                                            .font(.system(size: 14, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .frame(width: 44, height: 44)
+                                            .background(.ultraThinMaterial)
+                                            .environment(\.colorScheme, .dark)
+                                            .clipShape(Circle())
+                                    }
+                                }
+                                
+                                Spacer()
+                                
+                                // Top Right: Active stable resolution
+                                HStack(spacing: 6) {
+                                    Image(systemName: "bolt.horizontal.fill")
+                                        .foregroundColor(Color(hex: "007FFF"))
+                                    Text(globalPlayerInfo.resolutionString)
+                                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                        .foregroundColor(.white)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(.ultraThinMaterial)
+                                .environment(\.colorScheme, .dark)
+                                .cornerRadius(8)
+                            }
+                            .padding(.horizontal, isWide ? 40 : 20)
+                            .padding(.top, max(12, controlGeo.safeAreaInsets.top))
+                            
+                            Spacer()
+                            
+                            // Center Section (Play / Pause button)
+                            HStack {
+                                Button(action: {
+                                    globalPlayerInfo.togglePlayPause()
                                     resetTimer()
                                 }) {
-                                    Image(systemName: "list.bullet")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(showLandscapeChannelList ? Color(hex: "007FFF") : .white)
-                                        .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.45))
+                                    Image(systemName: globalPlayerInfo.isPlaying ? "pause.fill" : "play.fill")
+                                        .font(.system(size: 38, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .frame(width: 74, height: 74)
+                                        .background(.ultraThinMaterial)
+                                        .environment(\.colorScheme, .dark)
                                         .clipShape(Circle())
+                                        .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
                                 }
                             }
+                            
+                            Spacer()
+                            
+                            // Bottom Section (Active TV information + action options)
+                            HStack(alignment: .bottom) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    // Live Badge
+                                    HStack(spacing: 4) {
+                                        Circle().fill(Color.red).frame(width: 6, height: 6)
+                                        Text("CANLI")
+                                            .font(.system(size: 9, weight: .black))
+                                            .foregroundColor(.red)
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.black.opacity(0.5))
+                                    .cornerRadius(4)
+                                    
+                                    Text(channel.name)
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .lineLimit(1)
+                                    
+                                    Text(channel.safeGroup)
+                                        .font(.system(size: 13, weight: .regular))
+                                        .foregroundColor(.white.opacity(0.6))
+                                        .lineLimit(1)
+                                }
+                                
+                                Spacer()
+                                
+                                // Bottom Action Options (Settings, Toggle Favourite, Channel Selector)
+                                HStack(spacing: 12) {
+                                    Button(action: {
+                                        withAnimation {
+                                            showLandscapeSettings.toggle()
+                                            showLandscapeChannelList = false
+                                        }
+                                        resetTimer()
+                                    }) {
+                                        Image(systemName: "gearshape.fill")
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(showLandscapeSettings ? Color(hex: "007FFF") : .white)
+                                            .frame(width: 44, height: 44)
+                                            .background(Color.black.opacity(0.45))
+                                            .clipShape(Circle())
+                                    }
+                                    
+                                    Button(action: {
+                                        toggleFavourite(channel.url)
+                                        resetTimer()
+                                    }) {
+                                        Image(systemName: favourites.contains(channel.url) ? "bookmark.fill" : "bookmark")
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(favourites.contains(channel.url) ? .yellow : .white)
+                                            .frame(width: 44, height: 44)
+                                            .background(Color.black.opacity(0.45))
+                                            .clipShape(Circle())
+                                    }
+                                    
+                                    Button(action: {
+                                        withAnimation {
+                                            showLandscapeChannelList.toggle()
+                                            showLandscapeSettings = false
+                                            selectedLandscapeGroup = channel.safeGroup // auto select current group!
+                                        }
+                                        resetTimer()
+                                    }) {
+                                        Image(systemName: "list.bullet")
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(showLandscapeChannelList ? Color(hex: "007FFF") : .white)
+                                            .frame(width: 44, height: 44)
+                                            .background(Color.black.opacity(0.45))
+                                            .clipShape(Circle())
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, isWide ? 40 : 20)
+                            .padding(.bottom, max(12, controlGeo.safeAreaInsets.bottom))
                         }
-                        .padding(.horizontal, 40)
-                        .padding(.bottom, 24)
+                        .frame(width: controlGeo.size.width, height: controlGeo.size.height)
                     }
                     .zIndex(100)
                 }
@@ -2457,18 +2471,30 @@ struct ContentView: View {
                                 .id(selectedLandscapeGroup + "_" + landscapeSearchQuery)
                                 .onAppear {
                                     if let selected = selectedChannel, landscapeFilteredChannels.contains(where: { $0.url == selected.url }) {
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                                             withAnimation {
                                                 proxy.scrollTo(selected.url, anchor: .center)
+                                            }
+                                        }
+                                    } else if let first = landscapeFilteredChannels.first {
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                            withAnimation {
+                                                proxy.scrollTo(first.url, anchor: .top)
                                             }
                                         }
                                     }
                                 }
                                 .onChange(of: selectedLandscapeGroup) { _ in
                                     if let selected = selectedChannel, landscapeFilteredChannels.contains(where: { $0.url == selected.url }) {
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                                             withAnimation {
                                                 proxy.scrollTo(selected.url, anchor: .center)
+                                            }
+                                        }
+                                    } else if let first = landscapeFilteredChannels.first {
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                            withAnimation {
+                                                proxy.scrollTo(first.url, anchor: .top)
                                             }
                                         }
                                     }
@@ -5519,7 +5545,6 @@ class EPGManager: ObservableObject {
     @Published var progressPercent: [String: Double] = [:]  // streamId -> played progress (0.0 ... 1.0)
     
     private var isLoading = false
-    private let xmltvParser = XMLTVParser()
     
     private var lastFetchedAccountId: UUID? = nil
     
@@ -5556,9 +5581,17 @@ class EPGManager: ObservableObject {
         var request = URLRequest(url: epgUrl)
         request.setValue("VLC/3.0.18 LibVLC/3.0.18", forHTTPHeaderField: "User-Agent")
         
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
-            guard let self = self, let data = data else {
-                DispatchQueue.main.async { self?.isLoading = false }
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
+            guard let self = self else { return }
+            
+            if let error = error {
+                print("EPG Download failed: \(error.localizedDescription)")
+                DispatchQueue.main.async { self.isLoading = false }
+                return
+            }
+            
+            guard let data = data else {
+                DispatchQueue.main.async { self.isLoading = false }
                 return
             }
             
@@ -5569,7 +5602,9 @@ class EPGManager: ObservableObject {
                 finalData = data
             }
             
-            self.xmltvParser.parse(data: finalData) { result in
+            // Create a local, stateless XMLTVParser for thread-safety
+            let parser = XMLTVParser()
+            parser.parse(data: finalData) { result in
                 DispatchQueue.main.async {
                     self.currentPrograms = result.current
                     self.nextPrograms = result.next
@@ -5684,12 +5719,14 @@ class XMLTVParser: NSObject, XMLParserDelegate {
     }
     
     func parse(data: Data, completion: @escaping (ParseResult) -> Void) {
-        programs.removeAll()
-        channelMap.removeAll()
-        
-        let parser = XMLParser(data: data)
-        parser.delegate = self
-        parser.parse()
+        autoreleasepool {
+            programs.removeAll()
+            channelMap.removeAll()
+            
+            let parser = XMLParser(data: data)
+            parser.delegate = self
+            parser.parse()
+        }
         
         var newCurrent: [String: String] = [:]
         var newNext: [String: String] = [:]
@@ -5697,6 +5734,7 @@ class XMLTVParser: NSObject, XMLParserDelegate {
         
         let now = Date()
         let timeFormatter = DateFormatter()
+        timeFormatter.locale = Locale(identifier: "en_US_POSIX")
         timeFormatter.dateFormat = "HH:mm"
         
         for (chId, progs) in programs {
@@ -5720,7 +5758,8 @@ class XMLTVParser: NSObject, XMLParserDelegate {
             let possibleKeys = [chId] + (channelMap[chId] ?? [])
             
             for key in possibleKeys {
-                let safeKey = key.lowercased()
+                let safeKey = key.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                if safeKey.isEmpty { continue }
                 
                 if let curr = current {
                     newCurrent[safeKey] = curr.title
@@ -5737,6 +5776,10 @@ class XMLTVParser: NSObject, XMLParserDelegate {
             }
         }
         
+        // Clean up immediately for memory optimization
+        programs.removeAll()
+        channelMap.removeAll()
+        
         completion(ParseResult(current: newCurrent, next: newNext, progress: newProgress))
     }
     
@@ -5745,21 +5788,22 @@ class XMLTVParser: NSObject, XMLParserDelegate {
         
         if elementName == "channel" {
             isParsingChannel = true
-            currentChannelId = attributeDict["id"]
+            currentChannelId = attributeDict["id"]?.trimmingCharacters(in: .whitespacesAndNewlines)
             currentDisplayName = ""
         } else if elementName == "programme" {
             isParsingChannel = false
-            currentChannelId = attributeDict["channel"]
+            currentChannelId = attributeDict["channel"]?.trimmingCharacters(in: .whitespacesAndNewlines)
             currentStart = parseXMLDate(attributeDict["start"])
             currentEnd = parseXMLDate(attributeDict["stop"])
+            currentTitle = ""
+        } else if elementName == "display-name" {
+            currentDisplayName = ""
+        } else if elementName == "title" {
             currentTitle = ""
         }
     }
     
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        let clean = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        if clean.isEmpty { return }
-        
         if isParsingChannel && currentElement == "display-name" {
             currentDisplayName += string
         } else if !isParsingChannel && currentElement == "title" {
@@ -5768,11 +5812,17 @@ class XMLTVParser: NSObject, XMLParserDelegate {
     }
     
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-        if elementName == "channel" {
-            if let chId = currentChannelId, !currentDisplayName.isEmpty {
-                if channelMap[chId] == nil { channelMap[chId] = [] }
-                channelMap[chId]?.append(currentDisplayName.trimmingCharacters(in: .whitespacesAndNewlines))
+        if elementName == "display-name" {
+            if let chId = currentChannelId {
+                let trimmed = currentDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    if channelMap[chId] == nil { channelMap[chId] = [] }
+                    if !channelMap[chId]!.contains(trimmed) {
+                        channelMap[chId]?.append(trimmed)
+                    }
+                }
             }
+        } else if elementName == "channel" {
             currentChannelId = nil
             currentDisplayName = ""
         } else if elementName == "programme" {
@@ -5789,46 +5839,50 @@ class XMLTVParser: NSObject, XMLParserDelegate {
     }
     
     private func parseXMLDate(_ string: String?) -> Date? {
-        guard var s = string?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+        guard let originalStr = string?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
         
-        let formatters: [DateFormatter] = {
-            let f1 = DateFormatter()
-            f1.dateFormat = "yyyyMMddHHmmss Z"
-            
-            let f2 = DateFormatter()
-            f2.dateFormat = "yyyyMMddHHmmss"
-            
-            let f3 = DateFormatter()
-            f3.dateFormat = "yyyy-MM-dd HH:mm:ss"
-            
-            let f4 = DateFormatter()
-            f4.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
-            
-            return [f1, f2, f3, f4]
-        }()
+        // Handling dynamic EPG timezone offset representation variations, eg "+03:00" -> "+0300"
+        var s = originalStr
+        if let offsetIndex = s.range(of: "+", options: .backwards) ?? s.range(of: "-", options: .backwards) {
+            let tzPart = s[offsetIndex.lowerBound...]
+            if tzPart.contains(":") {
+                let cleanTz = tzPart.replacingOccurrences(of: ":", with: "")
+                s = s[..<offsetIndex.lowerBound] + cleanTz
+            }
+        }
         
-        for formatter in formatters {
+        let formats = [
+            "yyyyMMddHHmmss Z",
+            "yyyyMMddHHmm Z",
+            "yyyyMMddHHmmss",
+            "yyyyMMddHHmm",
+            "yyyy-MM-dd HH:mm:ss Z",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ssZ"
+        ]
+        
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        
+        for format in formats {
+            formatter.dateFormat = format
             if let date = formatter.date(from: s) {
                 return date
             }
         }
         
-        if s.contains(":") {
-            let components = s.components(separatedBy: " ")
-            if components.count == 2 {
-                let tz = components[1].replacingOccurrences(of: ":", with: "")
-                let cleanS = "\(components[0]) \(tz)"
-                let f = DateFormatter()
-                f.dateFormat = "yyyyMMddHHmmss Z"
-                if let d = f.date(from: cleanS) { return d }
+        let digitsOnly = originalStr.filter { "0123456789".contains($0) }
+        if digitsOnly.count >= 14 {
+            formatter.dateFormat = "yyyyMMddHHmmss"
+            if let date = formatter.date(from: String(digitsOnly.prefix(14))) {
+                return date
             }
-        }
-        
-        if s.count >= 14 {
-            let prefix14 = String(s.prefix(14))
-            let f = DateFormatter()
-            f.dateFormat = "yyyyMMddHHmmss"
-            if let d = f.date(from: prefix14) { return d }
+        } else if digitsOnly.count >= 12 {
+            formatter.dateFormat = "yyyyMMddHHmm"
+            if let date = formatter.date(from: String(digitsOnly.prefix(12))) {
+                return date
+            }
         }
         
         return nil
