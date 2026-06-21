@@ -395,8 +395,12 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 let asset = AVURLAsset(url: targetUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
                 let item = AVPlayerItem(asset: asset)
                 
-                // Native direct playback behavior for maximum compatibility & zero stalling
+                // Native direct playback behavior with optimization for weak cellular / wifi
+                item.preferredForwardBufferDuration = 1.0
+                item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
+                
                 let player = AVPlayer(playerItem: item)
+                player.automaticallyWaitsToMinimizeStalling = false
                 uiView.player = player
                 context.coordinator.player = player
                 
@@ -427,7 +431,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 }
                 context.coordinator.timeObserverToken = token
                 
-                player.play()
+                player.playImmediately(atRate: 1.0)
                 
                 DispatchQueue.main.async {
                     context.coordinator.infoManager?.isPlaying = true
@@ -611,7 +615,7 @@ struct ContentView: View {
                             
                             if channel.contentType != "live" {
                                 ScrollView {
-                                    VStack(alignment: .leading, spacing: 16) {
+                                    VStack(alignment: .leading, spacing: 20) {
                                         Text(channel.name)
                                             .font(.system(size: 24, weight: .bold))
                                             .foregroundColor(.white)
@@ -623,10 +627,37 @@ struct ContentView: View {
                                             .foregroundColor(.white.opacity(0.6))
                                             .padding(.horizontal, 20)
                                             
-                                        Text("Şimdi Oynatılıyor...")
-                                            .font(.system(size: 12, weight: .bold))
-                                            .foregroundColor(Color(hex: "6D28D9"))
-                                            .padding(.horizontal, 20)
+                                        // Dynamic Progress Slider in Portrait Detail Area
+                                        VStack(spacing: 8) {
+                                            Slider(value: Binding(
+                                                get: { globalPlayerInfo.currentTime },
+                                                set: { val in globalPlayerInfo.seek(to: val) }
+                                            ), in: 0...max(1.0, globalPlayerInfo.duration))
+                                            .accentColor(Color(hex: "007FFF"))
+                                            
+                                            HStack {
+                                                Text(formatTime(seconds: globalPlayerInfo.currentTime))
+                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                    .foregroundColor(.white.opacity(0.7))
+                                                
+                                                Spacer()
+                                                
+                                                let remaining = globalPlayerInfo.duration - globalPlayerInfo.currentTime
+                                                Text("-" + formatTime(seconds: max(0, remaining)))
+                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                    .foregroundColor(.white.opacity(0.7))
+                                            }
+                                        }
+                                        .padding(.horizontal, 20)
+                                        .environment(\.colorScheme, .dark)
+                                            
+                                        HStack(spacing: 6) {
+                                            Circle().fill(Color(hex: "007FFF")).frame(width: 6, height: 6)
+                                            Text(channel.contentType == "movie" ? "FİLM OYNATILIYOR" : "DİZİ OYNATILIYOR")
+                                                .font(.system(size: 11, weight: .black))
+                                                .foregroundColor(Color(hex: "007FFF"))
+                                        }
+                                        .padding(.horizontal, 20)
                                     }
                                 }
                                 .frame(height: geo.size.height * 0.65)
@@ -913,23 +944,31 @@ struct ContentView: View {
                             .padding(.horizontal, 16)
                             .padding(.bottom, 6)
                             
-                            // Progress Bar
-                            if channel.contentType == "live" {
-                                GeometryReader { geo in
-                                    ZStack(alignment: .leading) {
-                                        Rectangle()
-                                            .fill(Color.white.opacity(0.3))
-                                            .frame(height: 2.5)
-                                            .cornerRadius(1.25)
-                                        Rectangle()
-                                            .fill(Color.white)
-                                            .frame(width: geo.size.width * CGFloat(EPGManager.shared.programProgress(for: channel)), height: 2.5)
-                                            .cornerRadius(1.25)
+                            // Progress Bar for Movies/Series in Portrait Player Overlay
+                            if channel.contentType != "live" {
+                                VStack(spacing: 4) {
+                                    Slider(value: Binding(
+                                        get: { globalPlayerInfo.currentTime },
+                                        set: { val in globalPlayerInfo.seek(to: val) }
+                                    ), in: 0...max(1.0, globalPlayerInfo.duration))
+                                    .accentColor(Color(hex: "007FFF"))
+                                    
+                                    HStack {
+                                        Text(formatTime(seconds: globalPlayerInfo.currentTime))
+                                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                            .foregroundColor(.white.opacity(0.8))
+                                        
+                                        Spacer()
+                                        
+                                        let remaining = globalPlayerInfo.duration - globalPlayerInfo.currentTime
+                                        Text("-" + formatTime(seconds: max(0, remaining)))
+                                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                            .foregroundColor(.white.opacity(0.8))
                                     }
                                 }
-                                .frame(height: 2.5)
                                 .padding(.horizontal, 16)
                                 .padding(.bottom, 12)
+                                .environment(\.colorScheme, .dark)
                             }
                         }
                     }
@@ -1601,7 +1640,14 @@ struct ContentView: View {
         ZStack(alignment: .top) {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 0) {
-                    if let hero = channels.filter({ $0.contentType == "movie" }).first ?? channels.first {
+                    if let hero: Channel = {
+                        let pool = channels.filter({ $0.contentType == "movie" })
+                        let targetPool = pool.isEmpty ? channels : pool
+                        if targetPool.isEmpty { return nil }
+                        let day = Calendar.current.component(.day, from: Date())
+                        let index = day % targetPool.count
+                        return targetPool[index]
+                    }() {
                         ZStack(alignment: .bottom) {
                             if let url = URL(string: hero.logo) {
                                 AsyncImage(url: url) { phase in
@@ -1682,7 +1728,6 @@ struct ContentView: View {
                 
                 homeCategoryRow(title: "Senin İçin Seçilenler", type: "movie")
                 homeCategoryRow(title: "Son Eklenenler", type: "series")
-                homeCategoryRow(title: "Gündem", type: "live")
                 
                 Spacer().frame(height: 120)
             }
@@ -1729,7 +1774,7 @@ struct ContentView: View {
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.top, 50)
+            .padding(.top, 40)
         }
     }
     
