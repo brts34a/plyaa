@@ -208,6 +208,8 @@ class PlayerInfoManager: ObservableObject {
     @Published var isPlaying: Bool = true
     @Published var currentTime: Double = 0.0
     @Published var duration: Double = 1.0
+    @Published var isScrubbing: Bool = false
+    @Published var scrubbingTime: Double? = nil
     
     weak var player: AVPlayerUIView?
     var timer: Timer?
@@ -251,6 +253,29 @@ class PlayerInfoManager: ObservableObject {
         let time = CMTime(seconds: seconds, preferredTimescale: 600)
         p.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
         self.currentTime = seconds
+    }
+    
+    func scrubValueUpdated(to seconds: Double) {
+        scrubbingTime = seconds
+        guard let p = player?.player else { return }
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        p.seek(to: time) // standard fast keyframe seek during gesture drag
+    }
+    
+    func commitSeek() {
+        guard let p = player?.player, let seconds = scrubbingTime else {
+            isScrubbing = false
+            scrubbingTime = nil
+            return
+        }
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        p.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.currentTime = seconds
+                self?.isScrubbing = false
+                self?.scrubbingTime = nil
+            }
+        }
     }
     
     func userTapped() {
@@ -395,12 +420,12 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 let asset = AVURLAsset(url: targetUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
                 let item = AVPlayerItem(asset: asset)
                 
-                // Native direct playback behavior with optimization for weak cellular / wifi
-                item.preferredForwardBufferDuration = 1.0
+                // Optimize stream loading for weak cellular and wifi networks (auto buffer sizing, allow staging, low latency)
+                item.preferredForwardBufferDuration = 0 // 0 means automatic/system choice
                 item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
                 
                 let player = AVPlayer(playerItem: item)
-                player.automaticallyWaitsToMinimizeStalling = false
+                player.automaticallyWaitsToMinimizeStalling = true // protects against stream crashing on slow network
                 uiView.player = player
                 context.coordinator.player = player
                 
@@ -424,7 +449,9 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 // Add periodic time observer to track current playback time and total duration
                 let token = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak infoManager = context.coordinator.infoManager] time in
                     guard let infoManager = infoManager else { return }
-                    infoManager.currentTime = time.seconds
+                    if !infoManager.isScrubbing {
+                        infoManager.currentTime = time.seconds
+                    }
                     if let dur = player.currentItem?.duration, dur.isValid && !dur.seconds.isNaN && !dur.seconds.isInfinite {
                         infoManager.duration = dur.seconds
                     }
@@ -626,30 +653,6 @@ struct ContentView: View {
                                             .font(.system(size: 14))
                                             .foregroundColor(.white.opacity(0.6))
                                             .padding(.horizontal, 20)
-                                            
-                                        // Dynamic Progress Slider in Portrait Detail Area
-                                        VStack(spacing: 8) {
-                                            Slider(value: Binding(
-                                                get: { globalPlayerInfo.currentTime },
-                                                set: { val in globalPlayerInfo.seek(to: val) }
-                                            ), in: 0...max(1.0, globalPlayerInfo.duration))
-                                            .accentColor(Color(hex: "007FFF"))
-                                            
-                                            HStack {
-                                                Text(formatTime(seconds: globalPlayerInfo.currentTime))
-                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                    .foregroundColor(.white.opacity(0.7))
-                                                
-                                                Spacer()
-                                                
-                                                let remaining = globalPlayerInfo.duration - globalPlayerInfo.currentTime
-                                                Text("-" + formatTime(seconds: max(0, remaining)))
-                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                    .foregroundColor(.white.opacity(0.7))
-                                            }
-                                        }
-                                        .padding(.horizontal, 20)
-                                        .environment(\.colorScheme, .dark)
                                             
                                         HStack(spacing: 6) {
                                             Circle().fill(Color(hex: "007FFF")).frame(width: 6, height: 6)
@@ -947,20 +950,30 @@ struct ContentView: View {
                             // Progress Bar for Movies/Series in Portrait Player Overlay
                             if channel.contentType != "live" {
                                 VStack(spacing: 4) {
-                                    Slider(value: Binding(
-                                        get: { globalPlayerInfo.currentTime },
-                                        set: { val in globalPlayerInfo.seek(to: val) }
-                                    ), in: 0...max(1.0, globalPlayerInfo.duration))
+                                    Slider(
+                                        value: Binding(
+                                            get: { globalPlayerInfo.scrubbingTime ?? globalPlayerInfo.currentTime },
+                                            set: { val in globalPlayerInfo.scrubValueUpdated(to: val) }
+                                        ),
+                                        in: 0...max(1.0, globalPlayerInfo.duration),
+                                        onEditingChanged: { editing in
+                                            globalPlayerInfo.isScrubbing = editing
+                                            if !editing {
+                                                globalPlayerInfo.commitSeek()
+                                            }
+                                        }
+                                    )
                                     .accentColor(Color(hex: "007FFF"))
                                     
+                                    let displayTime = globalPlayerInfo.scrubbingTime ?? globalPlayerInfo.currentTime
                                     HStack {
-                                        Text(formatTime(seconds: globalPlayerInfo.currentTime))
+                                        Text(formatTime(seconds: displayTime))
                                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                             .foregroundColor(.white.opacity(0.8))
                                         
                                         Spacer()
                                         
-                                        let remaining = globalPlayerInfo.duration - globalPlayerInfo.currentTime
+                                        let remaining = globalPlayerInfo.duration - displayTime
                                         Text("-" + formatTime(seconds: max(0, remaining)))
                                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                             .foregroundColor(.white.opacity(0.8))
@@ -1774,7 +1787,7 @@ struct ContentView: View {
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.top, 40)
+            .padding(.top, 10)
         }
     }
     
@@ -2329,21 +2342,31 @@ struct ContentView: View {
                                 if channel.contentType != "live" {
                                     VStack(spacing: 4) {
                                         // Movie/Series Time Slider
-                                        Slider(value: Binding(
-                                            get: { globalPlayerInfo.currentTime },
-                                            set: { val in globalPlayerInfo.seek(to: val) }
-                                        ), in: 0...max(1.0, globalPlayerInfo.duration))
+                                        Slider(
+                                            value: Binding(
+                                                get: { globalPlayerInfo.scrubbingTime ?? globalPlayerInfo.currentTime },
+                                                set: { val in globalPlayerInfo.scrubValueUpdated(to: val) }
+                                            ),
+                                            in: 0...max(1.0, globalPlayerInfo.duration),
+                                            onEditingChanged: { editing in
+                                                globalPlayerInfo.isScrubbing = editing
+                                                if !editing {
+                                                    globalPlayerInfo.commitSeek()
+                                                }
+                                            }
+                                        )
                                         .accentColor(Color(hex: "007FFF"))
                                         
                                         // Time details labels
+                                        let displayTime = globalPlayerInfo.scrubbingTime ?? globalPlayerInfo.currentTime
                                         HStack {
-                                            Text(formatTime(seconds: globalPlayerInfo.currentTime))
+                                            Text(formatTime(seconds: displayTime))
                                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                                 .foregroundColor(.white.opacity(0.7))
                                             
                                             Spacer()
                                             
-                                            let remaining = globalPlayerInfo.duration - globalPlayerInfo.currentTime
+                                            let remaining = globalPlayerInfo.duration - displayTime
                                             Text("-" + formatTime(seconds: max(0, remaining)))
                                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                                 .foregroundColor(.white.opacity(0.7))
