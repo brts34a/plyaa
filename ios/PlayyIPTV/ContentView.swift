@@ -2166,6 +2166,8 @@ struct ContentView: View {
                     
                     GeometryReader { controlGeo in
                         let isWide = controlGeo.size.width > controlGeo.size.height
+                        let effectiveTopPadding = isWide ? max(12, controlGeo.safeAreaInsets.top) : (controlGeo.safeAreaInsets.top > 0 ? controlGeo.safeAreaInsets.top : 54)
+                        let effectiveBottomPadding = isWide ? max(12, controlGeo.safeAreaInsets.bottom) : (controlGeo.safeAreaInsets.bottom > 0 ? controlGeo.safeAreaInsets.bottom : 34)
                         
                         VStack {
                             // Top Section (Top bar buttons & resolution info)
@@ -2227,7 +2229,7 @@ struct ContentView: View {
                                 .cornerRadius(8)
                             }
                             .padding(.horizontal, isWide ? 40 : 20)
-                            .padding(.top, max(12, controlGeo.safeAreaInsets.top))
+                            .padding(.top, effectiveTopPadding)
                             
                             Spacer()
                             
@@ -2325,7 +2327,7 @@ struct ContentView: View {
                                 }
                             }
                             .padding(.horizontal, isWide ? 40 : 20)
-                            .padding(.bottom, max(12, controlGeo.safeAreaInsets.bottom))
+                            .padding(.bottom, effectiveBottomPadding)
                         }
                         .frame(width: controlGeo.size.width, height: controlGeo.size.height)
                     }
@@ -5534,358 +5536,67 @@ class UniqueChannelsCache {
     }
 }
 
-// MARK: - EPG Management Service (Fetches real-time EPG from Active IPTV account and binds dynamically to channels)
+// MARK: - EPG Management Service (Completely offline, low power, ultra-efficient category matching & dynamic time calculation)
 class EPGManager: ObservableObject {
     static let shared = EPGManager()
     
-    @Published var currentPrograms: [String: String] = [:] // streamId -> active program title
-    @Published var nextPrograms: [String: String] = [:]    // streamId -> upcoming program title
-    @Published var progressPercent: [String: Double] = [:]  // streamId -> played progress (0.0 ... 1.0)
-    
-    private var isLoading = false
-    
-    private var lastFetchedAccountId: UUID? = nil
+    @Published var currentPrograms: [String: String] = [:]
+    @Published var nextPrograms: [String: String] = [:]
+    @Published var progressPercent: [String: Double] = [:]
     
     func clearCache() {
-        self.lastFetchedAccountId = nil
-        self.currentPrograms.removeAll()
-        self.nextPrograms.removeAll()
-        self.progressPercent.removeAll()
+        // No-op for compatibility
     }
     
     func fetchEPG(for account: IPTVAccount) {
-        guard !isLoading else { return }
-        // Don't re-fetch if we already have it for this account
-        if lastFetchedAccountId == account.id && !currentPrograms.isEmpty { return }
-        
-        isLoading = true
-        lastFetchedAccountId = account.id
-        
-        let epgUrlStr: String?
-        if account.mode == 1 { // Xtream
-            let host = account.xtreamHost.trimmingCharacters(in: .whitespacesAndNewlines)
-            let user = account.xtreamUser.trimmingCharacters(in: .whitespacesAndNewlines)
-            let pass = account.xtreamPass.trimmingCharacters(in: .whitespacesAndNewlines)
-            epgUrlStr = "\(host)/xmltv.php?username=\(user)&password=\(pass)"
-        } else { // M3U
-            epgUrlStr = account.epgUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        
-        guard let urlStr = epgUrlStr, !urlStr.isEmpty, let epgUrl = URL(string: urlStr) else {
-            self.isLoading = false
-            return
-        }
-        
-        var request = URLRequest(url: epgUrl)
-        request.setValue("VLC/3.0.18 LibVLC/3.0.18", forHTTPHeaderField: "User-Agent")
-        
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
-            guard let self = self else { return }
-            
-            if let error = error {
-                print("EPG Download failed: \(error.localizedDescription)")
-                DispatchQueue.main.async { self.isLoading = false }
-                return
-            }
-            
-            guard let data = data else {
-                DispatchQueue.main.async { self.isLoading = false }
-                return
-            }
-            
-            let finalData: Data
-            if data.isGzipped(), let decompressed = data.gunzipped() {
-                finalData = decompressed
-            } else {
-                finalData = data
-            }
-            
-            // Create a local, stateless XMLTVParser for thread-safety
-            let parser = XMLTVParser()
-            parser.parse(data: finalData) { result in
-                DispatchQueue.main.async {
-                    self.currentPrograms = result.current
-                    self.nextPrograms = result.next
-                    self.progressPercent = result.progress
-                    self.isLoading = false
-                }
-            }
-        }.resume()
-    }
-    
-    private func normalizedKeys(for channel: Channel) -> [String] {
-        var keys: [String] = []
-        if let epg = channel.epgId?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines), !epg.isEmpty {
-            keys.append(epg)
-            keys.append(epg.replacingOccurrences(of: " ", with: ""))
-        }
-        if let sId = channel.streamId?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines), !sId.isEmpty {
-            keys.append(sId)
-        }
-        
-        let nameLower = channel.name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        keys.append(nameLower)
-        keys.append(nameLower.replacingOccurrences(of: " ", with: ""))
-        
-        // Advanced name normalizer: remove HD, FHD, SD, UHD, 4K, country prefixes like TR:, DE:, etc.
-        var cleanedName = nameLower
-        for prefix in ["tr:", "de:", "us:", "uk:", "fr:", "nl:", "turk:", "turkçe:"] {
-            if cleanedName.hasPrefix(prefix) {
-                cleanedName = cleanedName.replacingOccurrences(of: prefix, with: "")
-            }
-        }
-        for suffix in ["hd", "fhd", "sd", "uhd", "4k", "hevc", "backup", "yayın"] {
-            // strip suffix word
-            cleanedName = cleanedName.replacingOccurrences(of: " " + suffix, with: "")
-            cleanedName = cleanedName.replacingOccurrences(of: "-" + suffix, with: "")
-            cleanedName = cleanedName.replacingOccurrences(of: "[" + suffix + "]", with: "")
-            cleanedName = cleanedName.replacingOccurrences(of: "(" + suffix + ")", with: "")
-        }
-        cleanedName = cleanedName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !cleanedName.isEmpty && cleanedName != nameLower {
-            keys.append(cleanedName)
-            keys.append(cleanedName.replacingOccurrences(of: " ", with: ""))
-        }
-        
-        return keys
+        // Safe empty implementation - completely söküp attık! No network download or CPU parsing.
     }
     
     func currentProgramName(for channel: Channel) -> String {
-        let keys = normalizedKeys(for: channel)
-        for key in keys {
-            if let title = currentPrograms[key] { return title }
-        }
-        
         let categoryLower = channel.safeGroup.lowercased()
+        
         if categoryLower.contains("spor") || categoryLower.contains("sport") {
             return "Canlı Spor Kuşağı"
         } else if categoryLower.contains("belge") || categoryLower.contains("doc") || categoryLower.contains("bilim") || categoryLower.contains("doğa") || categoryLower.contains("nat") {
             return "Doğa ve Bilim Belgeseli"
         } else if categoryLower.contains("sinema") || categoryLower.contains("film") || categoryLower.contains("movie") || categoryLower.contains("vizyon") {
-            return "Sinema Şöleni"
+            return "Sinema Kuşağı"
         } else if categoryLower.contains("haber") || categoryLower.contains("news") {
             return "Haber Bülteni"
         } else if categoryLower.contains("çocuk") || categoryLower.contains("kids") || categoryLower.contains("animas") {
-            return "Çocuk Kuşağı: Eğlence Zamanı"
+            return "Çocuk Kuşağı"
         } else if categoryLower.contains("müzik") || categoryLower.contains("music") || categoryLower.contains("klip") {
             return "Müzik Keyfi"
         }
-        return "Premium Canlı Yayın"
+        return "Canlı Yayın Akışı"
     }
     
     func nextProgramName(for channel: Channel) -> String {
-        let keys = normalizedKeys(for: channel)
-        for key in keys {
-            if let title = nextPrograms[key] { return title }
-        }
+        let categoryLower = channel.safeGroup.lowercased()
         
-        // Şık zaman dilimi çak
-        let now = Date()
-        let nextHour = now.addingTimeInterval(3600)
-        let timeFormatter = DateFormatter()
-        timeFormatter.dateFormat = "HH:00"
-        let timeStr = timeFormatter.string(from: nextHour)
-        return "Sonraki Akış (\(timeStr))"
+        if categoryLower.contains("spor") || categoryLower.contains("sport") {
+            return "Sonraki Program: Özetler ve Analizler"
+        } else if categoryLower.contains("belge") || categoryLower.contains("doc") || categoryLower.contains("bilim") || categoryLower.contains("doğa") || categoryLower.contains("nat") {
+            return "Sonraki Program: Yeni Bölüm Belgesel"
+        } else if categoryLower.contains("sinema") || categoryLower.contains("film") || categoryLower.contains("movie") || categoryLower.contains("vizyon") {
+            return "Sonraki Program: Sinema Filmi"
+        } else if categoryLower.contains("haber") || categoryLower.contains("news") {
+            return "Sonraki Program: Gündem Özel"
+        } else if categoryLower.contains("çocuk") || categoryLower.contains("kids") || categoryLower.contains("animas") {
+            return "Sonraki Program: Çizgi Film Şenliği"
+        } else if categoryLower.contains("müzik") || categoryLower.contains("music") || categoryLower.contains("klip") {
+            return "Sonraki Program: Hit Müzik Listesi"
+        }
+        return "Sonraki Program: Canlı Akış"
     }
     
     func programProgress(for channel: Channel) -> Double {
-        let keys = normalizedKeys(for: channel)
-        for key in keys {
-            if let val = progressPercent[key] { return val }
-        }
-        return 0.0
+        let minute = Calendar.current.component(.minute, from: Date())
+        return Double(minute) / 60.0
     }
 }
 
-// MARK: - XMLTV Parser Engine
-class XMLTVParser: NSObject, XMLParserDelegate {
-    private var programs: [String: [(title: String, start: Date, end: Date)]] = [:]
-    private var channelMap: [String: [String]] = [:]
-    
-    private var currentElement = ""
-    private var currentChannelId: String?
-    private var currentStart: Date?
-    private var currentEnd: Date?
-    private var currentTitle = ""
-    private var currentDisplayName = ""
-    private var isParsingChannel = false
-    
-    struct ParseResult {
-        var current: [String: String]
-        var next: [String: String]
-        var progress: [String: Double]
-    }
-    
-    func parse(data: Data, completion: @escaping (ParseResult) -> Void) {
-        autoreleasepool {
-            programs.removeAll()
-            channelMap.removeAll()
-            
-            let parser = XMLParser(data: data)
-            parser.delegate = self
-            parser.parse()
-        }
-        
-        var newCurrent: [String: String] = [:]
-        var newNext: [String: String] = [:]
-        var newProgress: [String: Double] = [:]
-        
-        let now = Date()
-        let timeFormatter = DateFormatter()
-        timeFormatter.locale = Locale(identifier: "en_US_POSIX")
-        timeFormatter.dateFormat = "HH:mm"
-        
-        for (chId, progs) in programs {
-            let sorted = progs.sorted { $0.start < $1.start }
-            var current: (title: String, start: Date, end: Date)?
-            var next: (title: String, start: Date, end: Date)?
-            
-            for p in sorted {
-                if now >= p.start && now <= p.end {
-                    current = p
-                } else if now < p.start && next == nil {
-                    next = p
-                    break
-                }
-            }
-            
-            if current == nil && !sorted.isEmpty && sorted.last!.end > now {
-                current = sorted.last
-            }
-            
-            let possibleKeys = [chId] + (channelMap[chId] ?? [])
-            
-            for key in possibleKeys {
-                let safeKey = key.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                if safeKey.isEmpty { continue }
-                
-                if let curr = current {
-                    newCurrent[safeKey] = curr.title
-                    let total = curr.end.timeIntervalSince(curr.start)
-                    let elapsed = now.timeIntervalSince(curr.start)
-                    if total > 0 {
-                        newProgress[safeKey] = max(0.0, min(1.0, elapsed / total))
-                    }
-                }
-                
-                if let nxt = next {
-                    newNext[safeKey] = "\(nxt.title) (\(timeFormatter.string(from: nxt.start)))"
-                }
-            }
-        }
-        
-        // Clean up immediately for memory optimization
-        programs.removeAll()
-        channelMap.removeAll()
-        
-        completion(ParseResult(current: newCurrent, next: newNext, progress: newProgress))
-    }
-    
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
-        currentElement = elementName
-        
-        if elementName == "channel" {
-            isParsingChannel = true
-            currentChannelId = attributeDict["id"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-            currentDisplayName = ""
-        } else if elementName == "programme" {
-            isParsingChannel = false
-            currentChannelId = attributeDict["channel"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-            currentStart = parseXMLDate(attributeDict["start"])
-            currentEnd = parseXMLDate(attributeDict["stop"])
-            currentTitle = ""
-        } else if elementName == "display-name" {
-            currentDisplayName = ""
-        } else if elementName == "title" {
-            currentTitle = ""
-        }
-    }
-    
-    func parser(_ parser: XMLParser, foundCharacters string: String) {
-        if isParsingChannel && currentElement == "display-name" {
-            currentDisplayName += string
-        } else if !isParsingChannel && currentElement == "title" {
-            currentTitle += string
-        }
-    }
-    
-    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-        if elementName == "display-name" {
-            if let chId = currentChannelId {
-                let trimmed = currentDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    if channelMap[chId] == nil { channelMap[chId] = [] }
-                    if !channelMap[chId]!.contains(trimmed) {
-                        channelMap[chId]?.append(trimmed)
-                    }
-                }
-            }
-        } else if elementName == "channel" {
-            currentChannelId = nil
-            currentDisplayName = ""
-        } else if elementName == "programme" {
-            if let chId = currentChannelId, let s = currentStart, let e = currentEnd, !currentTitle.isEmpty {
-                let cleanTitle = currentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                if programs[chId] == nil { programs[chId] = [] }
-                programs[chId]?.append((title: cleanTitle, start: s, end: e))
-            }
-            currentChannelId = nil
-            currentStart = nil
-            currentEnd = nil
-            currentTitle = ""
-        }
-    }
-    
-    private func parseXMLDate(_ string: String?) -> Date? {
-        guard let originalStr = string?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
-        
-        // Handling dynamic EPG timezone offset representation variations, eg "+03:00" -> "+0300"
-        var s = originalStr
-        if let offsetIndex = s.range(of: "+", options: .backwards) ?? s.range(of: "-", options: .backwards) {
-            let tzPart = s[offsetIndex.lowerBound...]
-            if tzPart.contains(":") {
-                let cleanTz = tzPart.replacingOccurrences(of: ":", with: "")
-                s = s[..<offsetIndex.lowerBound] + cleanTz
-            }
-        }
-        
-        let formats = [
-            "yyyyMMddHHmmss Z",
-            "yyyyMMddHHmm Z",
-            "yyyyMMddHHmmss",
-            "yyyyMMddHHmm",
-            "yyyy-MM-dd HH:mm:ss Z",
-            "yyyy-MM-dd HH:mm:ss",
-            "yyyy-MM-dd'T'HH:mm:ss'Z'",
-            "yyyy-MM-dd'T'HH:mm:ssZ"
-        ]
-        
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        
-        for format in formats {
-            formatter.dateFormat = format
-            if let date = formatter.date(from: s) {
-                return date
-            }
-        }
-        
-        let digitsOnly = originalStr.filter { "0123456789".contains($0) }
-        if digitsOnly.count >= 14 {
-            formatter.dateFormat = "yyyyMMddHHmmss"
-            if let date = formatter.date(from: String(digitsOnly.prefix(14))) {
-                return date
-            }
-        } else if digitsOnly.count >= 12 {
-            formatter.dateFormat = "yyyyMMddHHmm"
-            if let date = formatter.date(from: String(digitsOnly.prefix(12))) {
-                return date
-            }
-        }
-        
-        return nil
-    }
-}
+
 
 // Helper extensıons to extract streamId for Xtream matching and decode base64
 
