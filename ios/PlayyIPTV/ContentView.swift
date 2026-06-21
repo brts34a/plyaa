@@ -314,49 +314,7 @@ struct NativeVideoPlayerView: UIViewControllerRepresentable {
             uiViewController.player?.replaceCurrentItem(with: nil)
             uiViewController.player = nil
             
-            // Magic Trick for IPTV Optimization: Smartly convert any Xtream Codes TS/Live link to HLS (.m3u8) for native AVPlayer
-            var optimizedUrlString = normalized
-            if let urlObj = URL(string: normalized) {
-                let pathParts = urlObj.path.split(separator: "/").map(String.init).filter { !$0.isEmpty }
-                
-                var isLiveXtream = false
-                var user = ""
-                var pass = ""
-                var id = ""
-                
-                if pathParts.count == 3 {
-                    user = pathParts[0]
-                    pass = pathParts[1]
-                    id = pathParts[2]
-                    isLiveXtream = true
-                } else if pathParts.count == 4 && pathParts[0].lowercased() == "live" {
-                    user = pathParts[1]
-                    pass = pathParts[2]
-                    id = pathParts[3]
-                    isLiveXtream = true
-                }
-                
-                if isLiveXtream {
-                    let idLower = id.lowercased()
-                    // Don't modify if it's already an explicit VOD extension
-                    if !idLower.hasSuffix(".mp4") && !idLower.hasSuffix(".mkv") && !idLower.hasSuffix(".avi") && !idLower.hasSuffix(".m3u8") {
-                        if let dotIndex = id.lastIndex(of: ".") {
-                            id = String(id[..<dotIndex])
-                        }
-                        
-                        if var components = URLComponents(string: normalized) {
-                            components.path = "/live/\(user)/\(pass)/\(id).m3u8"
-                            if let newUrl = components.url?.absoluteString {
-                                optimizedUrlString = newUrl
-                            }
-                        }
-                    }
-                } else {
-                    if optimizedUrlString.hasSuffix(".ts") {
-                        optimizedUrlString = String(optimizedUrlString.dropLast(3)) + ".m3u8"
-                    }
-                }
-            }
+            let optimizedUrlString = normalized
             
             if let url = URL(string: optimizedUrlString) {
                 try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
@@ -370,8 +328,8 @@ struct NativeVideoPlayerView: UIViewControllerRepresentable {
                 let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
                 let playerItem = AVPlayerItem(asset: asset)
                 
-                // 15 saniye önbellek ile donmaları sıfıra indirme
-                playerItem.preferredForwardBufferDuration = 15.0
+                // 1.0 saniye önbellek ile donmaları sıfıra indirirken neredeyse anında açılmasını sağlama
+                playerItem.preferredForwardBufferDuration = 1.0
                 
                 let player = AVPlayer(playerItem: playerItem)
                 player.automaticallyWaitsToMinimizeStalling = true
@@ -506,6 +464,10 @@ struct ContentView: View {
     @State private var showLandscapeSettings: Bool = false
     @State private var showBrightnessPill: Bool = false
     @State private var showVolumePill: Bool = false
+    @State private var showingControls: Bool = false
+    @State private var controlsTimer: Timer? = nil
+    @State private var brightnessLevel: CGFloat = UIScreen.main.brightness
+    @State private var volumeLevel: CGFloat = 0.5
     
     var body: some View {
         GeometryReader { geo in
@@ -1737,14 +1699,6 @@ struct ContentView: View {
         .buttonStyle(TabButtonStyle())
     }
     
-    @State private var showingControls: Bool = false
-    @State private var controlsTimer: Timer? = nil
-
-    @State private var showBrightnessPill = false
-    @State private var showVolumePill = false
-    @State private var brightnessLevel: CGFloat = UIScreen.main.brightness
-    @State private var volumeLevel: CGFloat = 0.5
-
     var landscapeFilteredChannels: [Channel] {
         let currentType = selectedChannel?.contentType ?? "live"
         var list = channels.filter { $0.contentType == currentType }
