@@ -409,7 +409,12 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             // Xtream Codes natively supports this and returns an HLS stream which AVPlayer prefers.
             var playableUrlString = normalized
             if playableUrlString.hasSuffix(".ts") {
-                playableUrlString = playableUrlString.replacingOccurrences(of: ".ts", with: ".m3u8")
+                // If it's an Xtream Codes style URL (even inside an M3U playlist), it supports HLS rewriting.
+                // Otherwise, keep the raw .ts stream because general .ts broadcasts don't have .m3u8 versions.
+                let isXtreamPattern = normalized.contains("/live/") || normalized.contains("/movie/") || normalized.contains("/series/")
+                if isXtreamPattern {
+                    playableUrlString = playableUrlString.replacingOccurrences(of: ".ts", with: ".m3u8")
+                }
             }
             
             if let targetUrl = URL(string: playableUrlString) {
@@ -425,7 +430,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
                 
                 let player = AVPlayer(playerItem: item)
-                player.automaticallyWaitsToMinimizeStalling = false // false allows immediate playback start without buffering delay
+                player.automaticallyWaitsToMinimizeStalling = true // protects against stream crashing on slow networks
                 uiView.player = player
                 context.coordinator.player = player
                 
@@ -2048,9 +2053,11 @@ struct ContentView: View {
     func tabItem(title: String, icon: String, tab: AppTab, isCircle: Bool = false) -> some View {
         Button(action: {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                if tab == .home {
+                // When switching to any tab, close the active player automatically so the user is cleanly redirected to the selected tab.
+                if selectedChannel != nil {
                     closeSelectedChannel()
                 }
+                
                 if currentTab == tab {
                     // Reset tab state if already active
                     if tab == .live { activeLiveCategory = nil }
