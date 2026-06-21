@@ -569,9 +569,11 @@ struct ContentView: View {
         )
         .sheet(isPresented: $showCategorySheet) {
             categorySelectionSheet
+                .presentationBackground(.ultraThinMaterial)
         }
         .sheet(isPresented: $showAccountsSheet) {
             accountsDrawerSheet
+                .presentationBackground(.ultraThinMaterial)
         }
         .preferredColorScheme(.dark) // Force dark color scheme to keep UI colors crisp
     }
@@ -1547,7 +1549,7 @@ struct ContentView: View {
                                 .background(
                                     ZStack {
                                         if isSelected {
-                                            VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialLight))
+                                            Color.white.opacity(0.6)
                                                 .opacity(0.3)
                                                 .cornerRadius(20)
                                                 .matchedGeometryEffect(id: "searchTabGlass", in: glassAnimation)
@@ -2301,7 +2303,7 @@ struct ContentView: View {
             .background(
                 ZStack {
                     if isSelected {
-                        VisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialLight)) // Glass
+                        Color.white.opacity(0.6)
                             .opacity(0.3)
                             .cornerRadius(8)
                             .matchedGeometryEffect(id: "typeTabGlass", in: glassAnimation)
@@ -3320,7 +3322,7 @@ struct ContentView: View {
     // MARK: - Premium Dion Accounts Drawer Sheet
     var accountsDrawerSheet: some View {
         ZStack {
-            Color(hex: "08090C").ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
             
             // Premium Blurry Neon Fluid Backgrounds
             ZStack {
@@ -4042,7 +4044,7 @@ struct ContentView: View {
     var categorySelectionSheet: some View {
         NavigationView {
             ZStack {
-                Color(hex: "0C0D14").ignoresSafeArea()
+                Color.clear.ignoresSafeArea()
                 
                 VStack(spacing: 16) {
                     // Search box
@@ -4333,49 +4335,23 @@ struct VisualEffectView: UIViewRepresentable {
 
 extension View {
     func sexyGlass(cornerRadius: CGFloat = 20) -> some View {
-        self.background(
-            ZStack {
-                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
-                Color.white.opacity(0.04)
-                Color.black.opacity(0.12)
-            }
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .stroke(
-                    LinearGradient(
-                        gradient: Gradient(colors: [Color.white.opacity(0.24), Color.white.opacity(0.04)]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1.0
-                )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        .shadow(color: Color.black.opacity(0.4), radius: 15, x: 0, y: 8)
+        self.background(.ultraThinMaterial)
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+            .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 5)
     }
     
     func sexyGlassCircle() -> some View {
-        self.background(
-            ZStack {
-                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
-                Color.white.opacity(0.04)
-                Color.black.opacity(0.12)
-            }
-        )
-        .overlay(
-            Circle()
-                .stroke(
-                    LinearGradient(
-                        gradient: Gradient(colors: [Color.white.opacity(0.24), Color.white.opacity(0.04)]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1.0
-                )
-        )
-        .clipShape(Circle())
-        .shadow(color: Color.black.opacity(0.4), radius: 15, x: 0, y: 8)
+        self.background(.ultraThinMaterial)
+            .overlay(
+                Circle()
+                    .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+            )
+            .clipShape(Circle())
+            .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 5)
     }
 }
 
