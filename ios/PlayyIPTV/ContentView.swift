@@ -179,7 +179,7 @@ extension MPVolumeView {
     }
 }
 
-class PlayerInfoManager: ObservableObject {
+class PlayerInfoManager: NSObject, ObservableObject {
     @Published var resolutionString: String = "Bağlanıyor..."
     @Published var isAudioOnly: Bool = false
     @Published var isOverlayVisible: Bool = true
@@ -187,16 +187,23 @@ class PlayerInfoManager: ObservableObject {
     weak var player: AVPlayer?
     var timer: Timer?
     var hideTimer: Timer?
+    private var isObserving = false
     
     func start(player: AVPlayer?) {
-        self.player?.removeObserver(self, forKeyPath: "rate")
+        if isObserving, let oldPlayer = self.player {
+            oldPlayer.removeObserver(self, forKeyPath: "rate")
+            isObserving = false
+        }
         self.player = player
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
             self?.update()
         }
         
-        self.player?.addObserver(self, forKeyPath: "rate", options: [.new, .initial], context: nil)
+        if let p = self.player {
+            p.addObserver(self, forKeyPath: "rate", options: [.new, .initial], context: nil)
+            isObserving = true
+        }
         
         userTapped() // initial show
     }
@@ -240,7 +247,10 @@ class PlayerInfoManager: ObservableObject {
     func stop() {
         timer?.invalidate()
         hideTimer?.invalidate()
-        player?.removeObserver(self, forKeyPath: "rate")
+        if isObserving, let p = player {
+            p.removeObserver(self, forKeyPath: "rate")
+            isObserving = false
+        }
         player?.pause()
         player = nil
         DispatchQueue.main.async {
@@ -5316,7 +5326,6 @@ struct VolumeSliderRepresentable: UIViewRepresentable {
     
     func makeUIView(context: Context) -> MPVolumeView {
         let view = MPVolumeView()
-        view.showsRouteButton = false
         view.alpha = 0.0001
         
         if let slider = view.subviews.first(where: { $0 is UISlider }) as? UISlider {
@@ -5590,7 +5599,6 @@ struct ProceduralEPG {
     
     static func nextProgram(for channelName: String) -> String {
         let nameLower = channelName.lowercased()
-        let hour = Calendar.current.component(.hour, from: Date())
         
         if nameLower.contains("spor") || nameLower.contains("sport") || nameLower.contains("bein") {
             return "La Liga Maç Özetleri (21:30)"
