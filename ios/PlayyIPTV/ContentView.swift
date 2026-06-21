@@ -3,7 +3,6 @@ import AVKit
 import Combine
 import AVFoundation
 import MediaPlayer
-import KSPlayer
 
 // MARK: - Safe Decoder Int/String Helper for Xtream Codes Compatibility
 enum SafeStringOrInt: Codable, Hashable {
@@ -184,11 +183,11 @@ class PlayerInfoManager: ObservableObject {
     @Published var isAudioOnly: Bool = false
     @Published var isOverlayVisible: Bool = true
     @Published var isPlaying: Bool = true
-    weak var player: IOSVideoPlayerView?
+    weak var player: AVPlayerUIView?
     var timer: Timer?
     var hideTimer: Timer?
     
-    func start(player: IOSVideoPlayerView?) {
+    func start(player: AVPlayerUIView?) {
         self.player = player
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
@@ -199,17 +198,19 @@ class PlayerInfoManager: ObservableObject {
     
     func update() {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self, let pLayer = self.player?.playerLayer else { return }
+            guard let self = self, let p = self.player?.player else { return }
             
-            let size = pLayer.player.naturalSize
-            if size.height > 10 {
-                self.resolutionString = "\(Int(size.height))p 50FPS"
+            if let item = p.currentItem {
+                let size = item.presentationSize
+                if size.height > 10 {
+                    self.resolutionString = "\(Int(size.height))p 50FPS"
+                }
             }
         }
     }
     
     func togglePlayPause() {
-        guard let p = player else { return }
+        guard let p = player?.player else { return }
         if isPlaying {
             p.pause()
             isPlaying = false
@@ -236,7 +237,7 @@ class PlayerInfoManager: ObservableObject {
     func stop() {
         timer?.invalidate()
         hideTimer?.invalidate()
-        player?.pause()
+        player?.player?.pause()
         player = nil
         DispatchQueue.main.async {
             self.resolutionString = "Bağlanıyor..."
@@ -250,15 +251,22 @@ class PlayerInfoManager: ObservableObject {
     }
 }
 
-struct TestKSPlayer: UIViewRepresentable {
-    func makeUIView(context: Context) -> IOSVideoPlayerView {
-        let view = IOSVideoPlayerView()
-        return view
+// MARK: - Native iOS High-Performance IPTV AVPlayer
+class AVPlayerUIView: UIView {
+    var playerLayer: AVPlayerLayer {
+        return layer as! AVPlayerLayer
     }
-    func updateUIView(_ uiView: IOSVideoPlayerView, context: Context) {}
+    
+    override class var layerClass: AnyClass {
+        return AVPlayerLayer.self
+    }
+    
+    var player: AVPlayer? {
+        get { playerLayer.player }
+        set { playerLayer.player = newValue }
+    }
 }
 
-// MARK: - Native iOS High-Performance IPTV AVPlayer (Switched to KSPlayer)
 struct NativeVideoPlayerView: UIViewRepresentable {
     let urlString: String
     let videoContentMode: UIView.ContentMode
@@ -267,12 +275,22 @@ struct NativeVideoPlayerView: UIViewRepresentable {
     
     class Coordinator: NSObject {
         var currentUrl: String = ""
-        var playerView: IOSVideoPlayerView?
+        var playerView: AVPlayerUIView?
+        var player: AVPlayer?
         weak var infoManager: PlayerInfoManager?
+        var statusObservation: NSKeyValueObservation?
+        var timeObserverToken: Any?
         
         init(infoManager: PlayerInfoManager) {
             self.infoManager = infoManager
             super.init()
+        }
+        
+        deinit {
+            statusObservation?.invalidate()
+            if let to = timeObserverToken, let p = player {
+                p.removeTimeObserver(to)
+            }
         }
     }
     
@@ -280,70 +298,77 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         Coordinator(infoManager: infoManager)
     }
     
-    func makeUIView(context: Context) -> IOSVideoPlayerView {
-        // Enforce FFmpeg backend for IPTV robust support to fix video/audio sync, "stuttering", and "audio-only" streams
-        KSOptions.firstPlayerType = KSMEPlayer.self
-        KSOptions.secondPlayerType = KSMEPlayer.self // Fallback
-        
-        // Optimize for IPTV streams
-        KSOptions.isAutoPlay = true
-        KSOptions.preferredForwardBufferDuration = 1.5
-        
-        let playerView = IOSVideoPlayerView()
-        playerView.backgroundColor = .black
-        playerView.isUserInteractionEnabled = false // Disable KSPlayer's own touch handling, so our UI catches touches
-        
-        // Ensure KSPlayer doesn't display its default controls by hiding its control overlay robustly
-        let hideControls = {
-            for subview in playerView.subviews {
-                let name = String(describing: type(of: subview))
-                if name.contains("Control") || name.contains("Mask") {
-                    subview.isHidden = true
-                    subview.alpha = 0
-                }
-            }
+    func makeUIView(context: Context) -> AVPlayerUIView {
+        let view = AVPlayerUIView()
+        view.backgroundColor = .black
+        switch videoContentMode {
+        case .scaleAspectFill:
+            view.playerLayer.videoGravity = .resizeAspectFill
+        case .scaleAspectFit:
+            view.playerLayer.videoGravity = .resizeAspect
+        default:
+            view.playerLayer.videoGravity = .resizeAspect
         }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: hideControls)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: hideControls)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: hideControls)
-        
-        context.coordinator.playerView = playerView
-        return playerView
+        context.coordinator.playerView = view
+        return view
     }
     
-    func updateUIView(_ uiView: IOSVideoPlayerView, context: Context) {
+    func updateUIView(_ uiView: AVPlayerUIView, context: Context) {
         let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
-            uiView.pause()
+            uiView.player?.pause()
             return
         }
         
         if context.coordinator.currentUrl != normalized {
             context.coordinator.currentUrl = normalized
             
-            // Revert the magic trick (.m3u8 conversion) since KSPlayer/FFmpeg processes everything natively perfectly,
-            // including TS and MKV directly!!
-            if let targetUrl = URL(string: normalized) {
+            // The Magic Trick: AVPlayer struggles with raw .ts streams.
+            // If the URL ends with .ts, we replace it with .m3u8.
+            // Xtream Codes natively supports this and returns an HLS stream which AVPlayer prefers.
+            var playableUrlString = normalized
+            if playableUrlString.hasSuffix(".ts") {
+                playableUrlString = playableUrlString.replacingOccurrences(of: ".ts", with: ".m3u8")
+            }
+            
+            if let targetUrl = URL(string: playableUrlString) {
                 try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
                 try? AVAudioSession.sharedInstance().setActive(true)
                 
-                let options = KSOptions()
-                options.userAgent = "VLC/3.0.18 LibVLC/3.0.18"
-                uiView.set(url: targetUrl, options: options)
-                uiView.play()
+                let player = AVPlayer(url: targetUrl)
+                uiView.player = player
+                context.coordinator.player = player
                 
-                // Keep the UI overlay synchronized
+                context.coordinator.statusObservation = player.currentItem?.observe(\.status, options: [.new, .old]) { item, _ in
+                    if item.status == .readyToPlay {
+                        DispatchQueue.main.async {
+                            context.coordinator.infoManager?.resolutionString = "Oynatılıyor"
+                            let size = item.presentationSize
+                            if size.width > 0 && size.height > 0 {
+                                context.coordinator.infoManager?.resolutionString = "\(Int(size.height))p"
+                            }
+                        }
+                    } else if item.status == .failed {
+                        DispatchQueue.main.async {
+                            context.coordinator.infoManager?.resolutionString = "Hata"
+                        }
+                    }
+                }
+                
+                player.play()
+                
                 DispatchQueue.main.async {
-                    context.coordinator.infoManager?.resolutionString = "Oynatılıyor"
                     context.coordinator.infoManager?.isPlaying = true
+                    // Provide a reference to the player layer instance so togglePlayPause works
+                    // Context infoManager can store an Any? reference to AVPlayer 
+                    context.coordinator.infoManager?.player = uiView
                 }
             }
         }
     }
     
-    static func dismantleUIView(_ uiView: IOSVideoPlayerView, coordinator: Coordinator) {
-        uiView.pause()
+    static func dismantleUIView(_ uiView: AVPlayerUIView, coordinator: Coordinator) {
+        uiView.player?.pause()
     }
 }
 
@@ -961,25 +986,119 @@ struct ContentView: View {
             .padding(.top, 20)
             .padding(.bottom, 16)
             
-            // Channel List
-            let filteredLive = channels.filter { $0.contentType == "live" && $0.safeGroup == category && (liveSearchQuery.isEmpty || $0.name.localizedCaseInsensitiveContains(liveSearchQuery)) }
-            
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(spacing: 8) {
-                    ForEach(filteredLive, id: \.id) { channel in
-                        ChannelRowView(
-                            channel: channel,
-                            isSelected: selectedChannel?.url == channel.url,
-                            isFavorite: favourites.contains(channel.url),
-                            onTapFavorite: { toggleFavourite(channel.url) },
-                            onTapChannel: { selectedChannel = channel }
-                        )
-                        .padding(.horizontal, 20)
-                    }
-                }
-                .padding(.bottom, 140) // Make room for tabs and player
+            // Header times
+            HStack {
+                Text("Bugün")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+                Spacer()
+                
+                let timeFormatter = DateFormatter()
+                let _ = timeFormatter.dateFormat = "HH:mm"
+                Text(timeFormatter.string(from: Date()))
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.white.opacity(0.5))
             }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+            
+            // Timeline
+            epgTimelineGrid(category: category)
         }
+    }
+    
+    func epgTimelineGrid(category: String) -> some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            LazyVStack(spacing: 8) {
+                let filteredLive = channels.filter { $0.contentType == "live" && $0.safeGroup == category && (liveSearchQuery.isEmpty || $0.name.localizedCaseInsensitiveContains(liveSearchQuery)) }
+                ForEach(filteredLive, id: \.id) { channel in
+                    HStack(spacing: 8) {
+                        // Left Logo Box
+                        Button(action: { selectedChannel = channel }) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(colorForChannel(channel.name))
+                                    .frame(width: 80, height: 64)
+                                
+                                if let url = URL(string: channel.logo), !channel.logo.isEmpty {
+                                    AsyncImage(url: url) { phase in
+                                        if let image = phase.image {
+                                            image.resizable().aspectRatio(contentMode: .fit).frame(width: 50, height: 50)
+                                        } else {
+                                            Text(channel.name.prefix(2).uppercased()).font(.system(size: 18, weight: .bold)).foregroundColor(.white)
+                                        }
+                                    }
+                                } else {
+                                    Text(channel.name.prefix(2).uppercased()).font(.system(size: 18, weight: .bold)).foregroundColor(.white)
+                                }
+                            }
+                        }
+                        
+                        // Right EPG Box
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                epgProgramBox(
+                                    channelName: channel.name,
+                                    title: EPGManager.shared.currentProgramName(for: channel),
+                                    isActive: true,
+                                    width: UIScreen.main.bounds.width - 120, // Occupy most space
+                                    onPress: { selectedChannel = channel }
+                                )
+                                
+                                let nextTitle = EPGManager.shared.nextProgramName(for: channel)
+                                if !nextTitle.isEmpty {
+                                    epgProgramBox(
+                                        channelName: channel.name,
+                                        title: nextTitle,
+                                        isActive: false,
+                                        width: 140,
+                                        onPress: {}
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+            }
+            .padding(.bottom, 140)
+        }
+    }
+    
+    func colorForChannel(_ name: String) -> Color {
+        let colors: [Color] = [
+            Color(red: 0.8, green: 0.7, blue: 0.2), // Yellowish
+            Color(red: 0.6, green: 0.2, blue: 0.3), // Reddish
+            Color(red: 0.2, green: 0.5, blue: 0.6), // Bluish
+            Color(red: 0.4, green: 0.4, blue: 0.4), // Grayish
+            Color(red: 0.9, green: 0.6, blue: 0.2), // Orange
+            Color(red: 0.3, green: 0.4, blue: 0.6), // Dark Blue
+            Color(red: 0.4, green: 0.6, blue: 0.3), // Green
+            Color(red: 0.5, green: 0.2, blue: 0.6)  // Purple
+        ]
+        let hash = abs(name.hashValue)
+        return colors[hash % colors.count]
+    }
+
+    func epgProgramBox(channelName: String, title: String, isActive: Bool, width: CGFloat, onPress: @escaping () -> Void) -> some View {
+        Button(action: onPress) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(channelName.uppercased())
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(0.6))
+                
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(width: width, height: 64, alignment: .leading)
+            .background(isActive ? Color.white.opacity(0.2) : Color.white.opacity(0.1))
+            .cornerRadius(12)
+        }
+        .buttonStyle(PlainButtonStyle())
     }
     
         @State private var activeLibraryCategory: String? = nil
@@ -5228,206 +5347,206 @@ class EPGManager: ObservableObject {
     @Published var progressPercent: [String: Double] = [:]  // streamId -> played progress (0.0 ... 1.0)
     
     private var isLoading = false
+    private let xmltvParser = XMLTVParser()
     
     func fetchEPG(for account: IPTVAccount) {
         guard !isLoading else { return }
         isLoading = true
         
-        if account.mode == 1 {
-            // Xtream Codes live streams EPG integration
+        let epgUrlStr: String?
+        if account.mode == 1 { // Xtream
             let host = account.xtreamHost.trimmingCharacters(in: .whitespacesAndNewlines)
             let user = account.xtreamUser.trimmingCharacters(in: .whitespacesAndNewlines)
             let pass = account.xtreamPass.trimmingCharacters(in: .whitespacesAndNewlines)
-            
-            guard let epgUrl = URL(string: "\(host)/player_api.php?username=\(user)&password=\(pass)&action=get_live_streams_epg") else {
-                self.isLoading = false
+            epgUrlStr = "\(host)/xmltv.php?username=\(user)&password=\(pass)"
+        } else { // M3U
+            epgUrlStr = account.epgUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        
+        guard let urlStr = epgUrlStr, !urlStr.isEmpty, let epgUrl = URL(string: urlStr) else {
+            self.isLoading = false
+            return
+        }
+        
+        var request = URLRequest(url: epgUrl)
+        request.setValue("VLC/3.0.18 LibVLC/3.0.18", forHTTPHeaderField: "User-Agent")
+        
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+            guard let self = self, let data = data else {
+                DispatchQueue.main.async { self?.isLoading = false }
                 return
             }
             
-            URLSession.shared.dataTask(with: epgUrl) { [weak self] data, _, _ in
-                guard let self = self, let data = data else {
-                    self?.isLoading = false
-                    return
-                }
-                
-                // Decode Xtream live streams EPG API response structure
-                struct XtreamEpgProgram: Codable {
-                    let title: String?
-                    let start: String?
-                    let end: String?
-                    let description: String?
-                }
-                
-                struct XtreamEpgData: Codable {
-                    let epg_data: [String: [XtreamEpgProgram]]?
-                }
-                
-                if let decoded = try? JSONDecoder().decode(XtreamEpgData.self, from: data), let dict = decoded.epg_data {
-                    var newCurrent: [String: String] = [:]
-                    var newNext: [String: String] = [:]
-                    var newProgress: [String: Double] = [:]
-                    
-                    let formatter = DateFormatter()
-                    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-                    formatter.timeZone = TimeZone(secondsFromGMT: 0) // Xtream dates are usually UTC/GMT
-                    
-                    let now = Date()
-                    
-                    for (streamId, programs) in dict {
-                        if programs.isEmpty { continue }
-                        
-                        var currentProg: XtreamEpgProgram? = nil
-                        var nextProg: XtreamEpgProgram? = nil
-                        
-                        for prog in programs {
-                            guard let startStr = prog.start, let endStr = prog.end else { continue }
-                            if let startD = formatter.date(from: startStr), let endD = formatter.date(from: endStr) {
-                                if now >= startD && now <= endD {
-                                    currentProg = prog
-                                } else if now < startD && (nextProg == nil || startD < (formatter.date(from: nextProg!.start!) ?? Date.distantFuture)) {
-                                    nextProg = prog
-                                }
-                            }
-                        }
-                        
-                        // Fallback to first program if times do not align perfectly
-                        if currentProg == nil && !programs.isEmpty {
-                            currentProg = programs.first
-                        }
-                        
-                        if let current = currentProg {
-                            let title = current.title?.decodeBase64IfNeeded() ?? ""
-                            if !title.isEmpty {
-                                newCurrent[streamId] = title
-                                
-                                if let startStr = current.start, let endStr = current.end,
-                                   let startD = formatter.date(from: startStr), let endD = formatter.date(from: endStr) {
-                                    let totalSecs = endD.timeIntervalSince(startD)
-                                    if totalSecs > 0 {
-                                        let elapsedSecs = now.timeIntervalSince(startD)
-                                        let percent = max(0.0, min(1.0, elapsedSecs / totalSecs))
-                                        newProgress[streamId] = percent
-                                    }
-                                }
-                            }
-                        }
-                        
-                        if let next = nextProg {
-                            let title = next.title?.decodeBase64IfNeeded() ?? ""
-                            if !title.isEmpty {
-                                let startText: String
-                                if let startStr = next.start, let startD = formatter.date(from: startStr) {
-                                    let timeFormatter = DateFormatter()
-                                    timeFormatter.dateFormat = "HH:mm"
-                                    startText = " (\(timeFormatter.string(from: startD)))"
-                                } else {
-                                    startText = ""
-                                }
-                                newNext[streamId] = title + startText
-                            }
-                        }
-                    }
-                    
-                    DispatchQueue.main.async {
-                        self.currentPrograms = newCurrent
-                        self.nextPrograms = newNext
-                        self.progressPercent = newProgress
-                        self.isLoading = false
-                    }
-                } else {
+            self.xmltvParser.parse(data: data) { result in
+                DispatchQueue.main.async {
+                    self.currentPrograms = result.current
+                    self.nextPrograms = result.next
+                    self.progressPercent = result.progress
                     self.isLoading = false
                 }
-            }.resume()
-        } else {
-            // M3U playlists: Procedural EPG triggers automatically for empty values
-            self.isLoading = false
-        }
+            }
+        }.resume()
     }
     
     func currentProgramName(for channel: Channel) -> String {
-        if let sId = channel.streamId, let title = currentPrograms[sId] {
-            return title
+        let keys = [channel.streamId, channel.name.lowercased(), channel.name.replacingOccurrences(of: " ", with: "")].compactMap { $0 }
+        for key in keys {
+            if let title = currentPrograms[key] { return title }
         }
-        return ProceduralEPG.currentProgram(for: channel.name)
+        return "Yayın Akışı Yok"
     }
     
     func nextProgramName(for channel: Channel) -> String {
-        if let sId = channel.streamId, let title = nextPrograms[sId] {
-            return title
+        let keys = [channel.streamId, channel.name.lowercased(), channel.name.replacingOccurrences(of: " ", with: "")].compactMap { $0 }
+        for key in keys {
+            if let title = nextPrograms[key] { return title }
         }
-        return ProceduralEPG.nextProgram(for: channel.name)
+        return ""
     }
     
     func programProgress(for channel: Channel) -> Double {
-        if let sId = channel.streamId, let val = progressPercent[sId] {
-            return val
+        let keys = [channel.streamId, channel.name.lowercased(), channel.name.replacingOccurrences(of: " ", with: "")].compactMap { $0 }
+        for key in keys {
+            if let val = progressPercent[key] { return val }
         }
-        return ProceduralEPG.progressValue(for: channel.name)
+        return 0.0
     }
 }
 
-// MARK: - Procedural EPG Generation (Generates high fidelity, realistic context-aware programs for flawless EPG coverage)
-struct ProceduralEPG {
-    static func currentProgram(for channelName: String) -> String {
-        let nameLower = channelName.lowercased()
-        let hour = Calendar.current.component(.hour, from: Date())
+// MARK: - XMLTV Parser Engine
+class XMLTVParser: NSObject, XMLParserDelegate {
+    private var programs: [String: [(title: String, start: Date, end: Date)]] = [:]
+    private var channelMap: [String: [String]] = [:]
+    
+    private var currentElement = ""
+    private var currentChannelId: String?
+    private var currentStart: Date?
+    private var currentEnd: Date?
+    private var currentTitle = ""
+    private var currentDisplayName = ""
+    private var isParsingChannel = false
+    
+    struct ParseResult {
+        var current: [String: String]
+        var next: [String: String]
+        var progress: [String: Double]
+    }
+    
+    func parse(data: Data, completion: @escaping (ParseResult) -> Void) {
+        programs.removeAll()
+        channelMap.removeAll()
         
-        if nameLower.contains("spor") || nameLower.contains("sport") || nameLower.contains("bein") {
-            if hour >= 19 && hour <= 22 {
-                return "Süper Lig: Canlı Maç Yayını"
-            } else if hour >= 12 && hour <= 15 {
-                return "Spor Gündemi & Transfer Özel"
-            } else {
-                return "Efsane Maçlar & Özetler"
+        let parser = XMLParser(data: data)
+        parser.delegate = self
+        parser.parse()
+        
+        var newCurrent: [String: String] = [:]
+        var newNext: [String: String] = [:]
+        var newProgress: [String: Double] = [:]
+        
+        let now = Date()
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm"
+        
+        for (chId, progs) in programs {
+            let sorted = progs.sorted { $0.start < $1.start }
+            var current: (title: String, start: Date, end: Date)?
+            var next: (title: String, start: Date, end: Date)?
+            
+            for p in sorted {
+                if now >= p.start && now <= p.end {
+                    current = p
+                } else if now < p.start && next == nil {
+                    next = p
+                    break
+                }
             }
-        } else if nameLower.contains("haber") || nameLower.contains("news") || nameLower.contains("trt") {
-            if hour >= 19 && hour <= 21 {
-                return "Ana Haber Bülteni"
-            } else if hour >= 6 && hour <= 10 {
-                return "Güne Bakış & Sabah Haberleri"
-            } else {
-                return "Son Dakika Gelişmeleri"
+            
+            if current == nil && !sorted.isEmpty && sorted.last!.end > now {
+                current = sorted.last
             }
-        } else if nameLower.contains("sinema") || nameLower.contains("film") || nameLower.contains("movie") {
-            if hour >= 20 {
-                return "Yabancı Sinema: Başlangıç (Inception)"
-            } else if hour >= 14 && hour <= 17 {
-                return "Aile Sineması: Yukarı Bak (Up)"
-            } else {
-                return "Aksiyon Kuşağı: Matrix"
+            
+            let possibleKeys = [chId] + (channelMap[chId] ?? [])
+            
+            for key in possibleKeys {
+                let safeKey = key.lowercased()
+                
+                if let curr = current {
+                    newCurrent[safeKey] = curr.title
+                    let total = curr.end.timeIntervalSince(curr.start)
+                    let elapsed = now.timeIntervalSince(curr.start)
+                    if total > 0 {
+                        newProgress[safeKey] = max(0.0, min(1.0, elapsed / total))
+                    }
+                }
+                
+                if let nxt = next {
+                    newNext[safeKey] = "\(nxt.title) (\(timeFormatter.string(from: nxt.start)))"
+                }
             }
-        } else if nameLower.contains("dizi") || nameLower.contains("series") {
-            return "Yerli Dizi: Kuruluş Osman"
-        } else if nameLower.contains("belgesel") || nameLower.contains("doc") || nameLower.contains("nat") {
-            return "Vahşi Yaşam Günlükleri: Savana"
-        } else {
-            if hour >= 20 && hour <= 23 {
-                return "MasterChef Türkiye"
-            } else if hour >= 10 && hour <= 13 {
-                return "Müge Anlı ile Tatlı Sert"
-            } else {
-                return "Haberler & Gündem Özel"
-            }
+        }
+        
+        completion(ParseResult(current: newCurrent, next: newNext, progress: newProgress))
+    }
+    
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
+        currentElement = elementName
+        
+        if elementName == "channel" {
+            isParsingChannel = true
+            currentChannelId = attributeDict["id"]
+        } else if elementName == "programme" {
+            isParsingChannel = false
+            currentChannelId = attributeDict["channel"]
+            currentStart = parseXMLDate(attributeDict["start"])
+            currentEnd = parseXMLDate(attributeDict["stop"])
+            currentTitle = ""
         }
     }
     
-    static func nextProgram(for channelName: String) -> String {
-        let nameLower = channelName.lowercased()
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        let clean = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.isEmpty { return }
         
-        if nameLower.contains("spor") || nameLower.contains("sport") || nameLower.contains("bein") {
-            return "La Liga Maç Özetleri (21:30)"
-        } else if nameLower.contains("haber") || nameLower.contains("news") {
-            return "Gece Raporu (23:00)"
-        } else if nameLower.contains("sinema") || nameLower.contains("film") || nameLower.contains("movie") {
-            return "Gece Sineması: Prestij (22:30)"
-        } else {
-            return "Akşam Kuşağı Haber Bülteni (19:00)"
+        if isParsingChannel && currentElement == "display-name" {
+            currentDisplayName += string
+        } else if !isParsingChannel && currentElement == "title" {
+            currentTitle += string
         }
     }
     
-    static func progressValue(for channelName: String) -> Double {
-        let minute = Double(Calendar.current.component(.minute, from: Date()))
-        return (minute.truncatingRemainder(dividingBy: 30.0)) / 30.0
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        if elementName == "channel" {
+            if let chId = currentChannelId, !currentDisplayName.isEmpty {
+                if channelMap[chId] == nil { channelMap[chId] = [] }
+                channelMap[chId]?.append(currentDisplayName.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            currentChannelId = nil
+            currentDisplayName = ""
+        } else if elementName == "programme" {
+            if let chId = currentChannelId, let s = currentStart, let e = currentEnd, !currentTitle.isEmpty {
+                let cleanTitle = currentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                if programs[chId] == nil { programs[chId] = [] }
+                programs[chId]?.append((title: cleanTitle, start: s, end: e))
+            }
+            currentChannelId = nil
+            currentStart = nil
+            currentEnd = nil
+            currentTitle = ""
+        }
+    }
+    
+    private func parseXMLDate(_ string: String?) -> Date? {
+        guard let s = string?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMddHHmmss Z"
+        if let d = formatter.date(from: s) { return d }
+        
+        formatter.dateFormat = "yyyyMMddHHmmss"
+        if s.count >= 14 {
+            return formatter.date(from: String(s.prefix(14)))
+        }
+        return nil
     }
 }
 
