@@ -3941,8 +3941,9 @@ struct ContentView: View {
                             }
                         }
                     }
-                }
-            }.resume() // series
+                } // End else
+            }
+        }.resume() // series
         }.resume() // vod
     }.resume() // live
 }
