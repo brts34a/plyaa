@@ -569,11 +569,11 @@ struct ContentView: View {
         )
         .sheet(isPresented: $showCategorySheet) {
             categorySelectionSheet
-                .presentationBackground(.ultraThinMaterial)
+                .sexySheetBackground()
         }
         .sheet(isPresented: $showAccountsSheet) {
             accountsDrawerSheet
-                .presentationBackground(.ultraThinMaterial)
+                .sexySheetBackground()
         }
         .preferredColorScheme(.dark) // Force dark color scheme to keep UI colors crisp
     }
@@ -1759,7 +1759,7 @@ struct ContentView: View {
                             
                             // Top Right: Stable Active Resolution and FPS indicator
                             HStack {
-                                Text(resolutionString)
+                                Text(globalPlayerInfo.resolutionString)
                                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                                     .foregroundColor(.green)
                                     .padding(.horizontal, 12)
@@ -4334,6 +4334,15 @@ struct VisualEffectView: UIViewRepresentable {
 }
 
 extension View {
+    @ViewBuilder
+    func sexySheetBackground() -> some View {
+        if #available(iOS 16.4, *) {
+            self.presentationBackground(.ultraThinMaterial)
+        } else {
+            self
+        }
+    }
+    
     func sexyGlass(cornerRadius: CGFloat = 20) -> some View {
         self.background(.ultraThinMaterial)
             .overlay(
