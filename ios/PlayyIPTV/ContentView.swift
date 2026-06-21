@@ -379,9 +379,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 // Advanced live IPTV buffering and anti-stutter optimizations
                 item.preferredForwardBufferDuration = 6.0 // Keeps 6s buffer ahead of playing to absorb network drops
                 item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
-                if #available(iOS 15.0, *) {
-                    item.preferredConfiguredForLowLatencyLeaveLiveStreamThreshold = 2.0
-                }
+
                 
                 let player = AVPlayer(playerItem: item)
                 player.automaticallyWaitsToMinimizeStalling = true // Waits gracefully for dynamic buffers to minimize stalling
