@@ -67,12 +67,13 @@ struct Channel: Identifiable, Codable, Hashable {
     let url: String
     var contentType: String = "live" // "live", "movie", "series"
     var added: Int? = 0
+    var streamId: String? = nil
     
     enum CodingKeys: String, CodingKey {
-        case id, name, logo, group, url, contentType, added
+        case id, name, logo, group, url, contentType, added, streamId
     }
     
-    init(name: String, logo: String, group: String, url: String, contentType: String = "live", added: Int? = 0) {
+    init(name: String, logo: String, group: String, url: String, contentType: String = "live", added: Int? = 0, streamId: String? = nil) {
         self.id = UUID()
         self.name = name
         self.logo = logo
@@ -80,6 +81,7 @@ struct Channel: Identifiable, Codable, Hashable {
         self.url = url
         self.contentType = contentType
         self.added = added ?? 0
+        self.streamId = streamId
     }
     
     init(from decoder: Decoder) throws {
@@ -91,6 +93,7 @@ struct Channel: Identifiable, Codable, Hashable {
         self.url = try container.decode(String.self, forKey: .url)
         self.contentType = try container.decodeIfPresent(String.self, forKey: .contentType) ?? "live"
         self.added = try container.decodeIfPresent(Int.self, forKey: .added) ?? 0
+        self.streamId = try container.decodeIfPresent(String.self, forKey: .streamId)
     }
     
     func encode(to encoder: Encoder) throws {
@@ -1634,6 +1637,7 @@ struct ContentView: View {
                         // Reload Action
                         if !activeAccountIdString.isEmpty {
                             if let acc = accounts.first(where: { $0.id.uuidString == activeAccountIdString }) {
+                                EPGManager.shared.clearCache()
                                 if acc.mode == 0 {
                                     fetchM3uDataInSheet(acc.m3uUrl)
                                 } else {
@@ -3812,7 +3816,7 @@ struct ContentView: View {
                         let grp = fetchedCategories["live_" + catIdStr] ?? "Canlı Yayın"
                         let ext = s.container_extension ?? "ts"
                         let url = "\(cleanHost)/live/\(user)/\(pass)/\(sId).\(ext)"
-                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "live"))
+                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "live", streamId: String(sId)))
                     }
                 }
                 
@@ -3938,10 +3942,9 @@ struct ContentView: View {
                         }
                     }
                 }
-            }
-        }.resume()
-    }.resume()
-}.resume()
+            }.resume() // series
+        }.resume() // vod
+    }.resume() // live
 }
 
 // MARK: - Legacy direct API fetch handler
@@ -4024,7 +4027,7 @@ struct ContentView: View {
                         let grp = fetchedCategories["live_" + catIdStr] ?? "Canlı Yayın"
                         let ext = s.container_extension ?? "ts"
                         let url = "\(cleanHost)/live/\(user)/\(pass)/\(sId).\(ext)"
-                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "live"))
+                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "live", streamId: String(sId)))
                     }
                 }
             }.resume()
@@ -5409,6 +5412,13 @@ class EPGManager: ObservableObject {
     private let xmltvParser = XMLTVParser()
     
     private var lastFetchedAccountId: UUID? = nil
+    
+    func clearCache() {
+        self.lastFetchedAccountId = nil
+        self.currentPrograms.removeAll()
+        self.nextPrograms.removeAll()
+        self.progressPercent.removeAll()
+    }
     
     func fetchEPG(for account: IPTVAccount) {
         guard !isLoading else { return }
