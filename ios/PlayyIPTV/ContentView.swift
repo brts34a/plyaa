@@ -409,7 +409,10 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             // Xtream Codes natively supports this and returns an HLS stream which AVPlayer prefers.
             var playableUrlString = normalized
             if playableUrlString.hasSuffix(".ts") {
-                playableUrlString = playableUrlString.replacingOccurrences(of: ".ts", with: ".m3u8")
+                let isXtream = UserDefaults.standard.integer(forKey: "iptv_mode") == 1
+                if isXtream {
+                    playableUrlString = playableUrlString.replacingOccurrences(of: ".ts", with: ".m3u8")
+                }
             }
             
             if let targetUrl = URL(string: playableUrlString) {
@@ -421,11 +424,11 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 let item = AVPlayerItem(asset: asset)
                 
                 // Optimize stream loading for weak cellular and wifi networks (auto buffer sizing, allow staging, low latency)
-                item.preferredForwardBufferDuration = 0 // 0 means automatic/system choice
+                item.preferredForwardBufferDuration = 1.0
                 item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
                 
                 let player = AVPlayer(playerItem: item)
-                player.automaticallyWaitsToMinimizeStalling = true // protects against stream crashing on slow network
+                player.automaticallyWaitsToMinimizeStalling = false // false allows immediate playback start without buffering delay
                 uiView.player = player
                 context.coordinator.player = player
                 
@@ -4904,6 +4907,11 @@ struct ContentView: View {
                                 .padding(.horizontal, 20)
                             
                             VStack(spacing: 0) {
+                                let statusText = (acc.status ?? serverStatus).isEmpty ? "AKTİF" : (acc.status ?? serverStatus).uppercased()
+                                let activeConsValue = acc.mode == 1 ? ((acc.activeConnections ?? serverActiveCons).isEmpty ? "0" : (acc.activeConnections ?? serverActiveCons)) : "1"
+                                let maxConsValue = acc.mode == 1 ? ((acc.maxConnections ?? serverMaxCons).isEmpty ? "1" : (acc.maxConnections ?? serverMaxCons)) : "Sınırsız"
+                                let expiryText = acc.mode == 1 ? ((acc.expDate ?? serverExpiry).isEmpty ? "Bilinmiyor" : (acc.expDate ?? serverExpiry)) : "Süresiz"
+                                
                                 HStack {
                                     Image(systemName: "wifi")
                                         .foregroundColor(.white.opacity(0.7))
@@ -4912,54 +4920,52 @@ struct ContentView: View {
                                         .font(.system(size: 16))
                                         .foregroundColor(.white.opacity(0.7))
                                         .padding(.leading, 4)
-                                    Text((acc.status ?? serverStatus).isEmpty ? "AKTİF" : (acc.status ?? serverStatus).uppercased())
+                                    Text(statusText)
                                         .font(.system(size: 16, weight: .bold))
-                                        .foregroundColor((acc.status ?? serverStatus).lowercased() == "expired" ? .red : .white)
+                                        .foregroundColor(statusText.lowercased() == "expired" ? .red : .white)
                                         .padding(.leading, 4)
                                     Spacer()
                                 }
                                 .padding(.vertical, 12)
                                 .padding(.horizontal, 16)
                                 
-                                if acc.mode == 1 {
-                                    Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
-                                    
-                                    HStack {
-                                        Image(systemName: "point.3.connected.trianglepath.dotted")
-                                            .foregroundColor(.white.opacity(0.7))
-                                            .frame(width: 24)
-                                        Text("Bağlantılar:")
-                                            .font(.system(size: 16))
-                                            .foregroundColor(.white.opacity(0.7))
-                                            .padding(.leading, 4)
-                                        Text("\((acc.activeConnections ?? serverActiveCons).isEmpty ? "0" : (acc.activeConnections ?? serverActiveCons))/\((acc.maxConnections ?? serverMaxCons).isEmpty ? "1" : (acc.maxConnections ?? serverMaxCons))")
-                                            .font(.system(size: 16, weight: .bold))
-                                            .foregroundColor(.white)
-                                            .padding(.leading, 4)
-                                        Spacer()
-                                    }
-                                    .padding(.vertical, 12)
-                                    .padding(.horizontal, 16)
-                                    
-                                    Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
-                                    
-                                    HStack {
-                                        Image(systemName: "calendar")
-                                            .foregroundColor(.white.opacity(0.7))
-                                            .frame(width: 24)
-                                        Text("Sona eriyor:")
-                                            .font(.system(size: 16))
-                                            .foregroundColor(.white.opacity(0.7))
-                                            .padding(.leading, 4)
-                                        Text((acc.expDate ?? serverExpiry).isEmpty ? "Bilinmiyor" : (acc.expDate ?? serverExpiry))
-                                            .font(.system(size: 16, weight: .bold))
-                                            .foregroundColor(.white)
-                                            .padding(.leading, 4)
-                                        Spacer()
-                                    }
-                                    .padding(.vertical, 12)
-                                    .padding(.horizontal, 16)
+                                Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
+                                
+                                HStack {
+                                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .frame(width: 24)
+                                    Text("Bağlantılar:")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .padding(.leading, 4)
+                                    Text("\(activeConsValue)/\(maxConsValue)")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .padding(.leading, 4)
+                                    Spacer()
                                 }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                                
+                                Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
+                                
+                                HStack {
+                                    Image(systemName: "calendar")
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .frame(width: 24)
+                                    Text("Sona eriyor:")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .padding(.leading, 4)
+                                    Text(expiryText)
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .padding(.leading, 4)
+                                    Spacer()
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
                             }
                             .sexyGlass(cornerRadius: 16)
                             .padding(.horizontal, 20)
