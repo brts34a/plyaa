@@ -200,7 +200,6 @@ class PlayerInfoManager: ObservableObject {
     func update() {
         DispatchQueue.main.async { [weak self] in
             guard let self = self, let pLayer = self.player?.playerLayer else { return }
-            self.isPlaying = pLayer.player.state == .playing
             
             let size = pLayer.player.naturalSize
             if size.height > 10 {
@@ -211,10 +210,12 @@ class PlayerInfoManager: ObservableObject {
     
     func togglePlayPause() {
         guard let p = player else { return }
-        if p.playerLayer?.player.state == .playing {
+        if isPlaying {
             p.pause()
+            isPlaying = false
         } else {
             p.play()
+            isPlaying = true
         }
     }
     
@@ -284,11 +285,13 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         KSOptions.firstPlayerType = KSMEPlayer.self
         KSOptions.secondPlayerType = KSMEPlayer.self // Fallback
         
+        // Optimize for IPTV streams
+        KSOptions.isAutoPlay = true
+        KSOptions.preferredForwardBufferDuration = 1.5
+        KSOptions.userAgent = "VLC/3.0.18 LibVLC/3.0.18"
+        
         let playerView = IOSVideoPlayerView()
         playerView.backgroundColor = .black
-        
-        // Hide default KSPlayer UI if we want to show our own
-        playerView.isControlsHidden = !showsPlaybackControls
         
         context.coordinator.playerView = playerView
         return playerView
@@ -307,14 +310,10 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             // Revert the magic trick (.m3u8 conversion) since KSPlayer/FFmpeg processes everything natively perfectly,
             // including TS and MKV directly!!
             if let targetUrl = URL(string: normalized) {
-                let options = KSOptions()
-                options.isAutoPlay = true
-                options.preferredForwardBufferDuration = 1.5 // Keeps memory low, starts fast
-                options.userAgent = "VLC/3.0.18 LibVLC/3.0.18"
-                
                 try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
                 try? AVAudioSession.sharedInstance().setActive(true)
                 
+                let options = KSOptions()
                 uiView.set(url: targetUrl, options: options)
                 uiView.play()
                 
@@ -3246,6 +3245,26 @@ struct ContentView: View {
             var currentGroup = "Genel"
             var currentLogo = ""
             
+            var foundEpgUrl: String? = nil
+            if let firstLine = lines.first(where: { $0.hasPrefix("#EXTM3U") }) {
+                if let range = firstLine.range(of: "x-tvg-url=\"") {
+                    let sub = firstLine[range.upperBound...]
+                    if let end = sub.range(of: "\"") {
+                        foundEpgUrl = String(sub[..<end.lowerBound])
+                    }
+                }
+            }
+            if let found = foundEpgUrl {
+                DispatchQueue.main.async {
+                    if let idx = self.accounts.firstIndex(where: { $0.m3uUrl == self.m3uUrl }) {
+                        if self.accounts[idx].epgUrl != found {
+                            self.accounts[idx].epgUrl = found
+                            self.saveAccounts()
+                        }
+                    }
+                }
+            }
+            
             for line in lines {
                 let clean = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 if clean.isEmpty { continue }
@@ -4548,34 +4567,50 @@ struct ContentView: View {
                             
                             Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
                             
-                            Button(action: {
-                                sheetIsLoading = true
-                                sheetLoadingMessage = "Aktif EPG verileri indiriliyor..."
-                                Task {
-                                    EPGManager.shared.fetchEPG(for: acc)
-                                    try? await Task.sleep(nanoseconds: 1200_000_000)
-                                    await MainActor.run {
-                                        sheetIsLoading = false
-                                        cacheClearedMessage = "EPG başarıyla güncellendi."
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                            cacheClearedMessage = nil
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Button(action: {
+                                    sheetIsLoading = true
+                                    sheetLoadingMessage = "Aktif EPG verileri indiriliyor..."
+                                    Task {
+                                        EPGManager.shared.fetchEPG(for: acc)
+                                        try? await Task.sleep(nanoseconds: 1200_000_000)
+                                        await MainActor.run {
+                                            sheetIsLoading = false
+                                            cacheClearedMessage = "EPG başarıyla güncellendi."
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                                cacheClearedMessage = nil
+                                            }
                                         }
                                     }
+                                }) {
+                                    HStack {
+                                        Image(systemName: "book.pages")
+                                            .foregroundColor(.white.opacity(0.7))
+                                            .frame(width: 24)
+                                        Text("EPG'yi yönet")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(.white)
+                                            .padding(.leading, 4)
+                                        Spacer()
+                                        Image(systemName: "arrow.triangle.2.circlepath")
+                                            .foregroundColor(.white.opacity(0.4))
+                                            .font(.system(size: 14, weight: .semibold))
+                                    }
+                                    .padding(.vertical, 12)
+                                    .padding(.horizontal, 16)
                                 }
-                            }) {
+                                
                                 HStack {
-                                    Image(systemName: "book.pages")
-                                        .foregroundColor(.white.opacity(0.7))
-                                        .frame(width: 24)
-                                    Text("EPG'yi yönet")
-                                        .font(.system(size: 16))
-                                        .foregroundColor(.white)
-                                        .padding(.leading, 4)
-                                    Spacer()
-                                    Image(systemName: "chevron.right").foregroundColor(.white.opacity(0.4)).font(.system(size: 14, weight: .semibold))
+                                    let epgSrc = acc.mode == 1 ? "\(acc.xtreamHost)/player_api.php?action=get_live_streams_epg" : (acc.epgUrl ?? "Özel EPG Bulunamadı")
+                                    Text("Gerçek Sunucu: " + epgSrc)
+                                        .font(.system(size: 10, weight: .regular))
+                                        .foregroundColor(Color.white.opacity(0.3))
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
                                 }
-                                .padding(.vertical, 12)
                                 .padding(.horizontal, 16)
+                                .padding(.bottom, 8)
                             }
                             
                             Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
