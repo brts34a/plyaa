@@ -68,12 +68,13 @@ struct Channel: Identifiable, Codable, Hashable {
     var contentType: String = "live" // "live", "movie", "series"
     var added: Int? = 0
     var customStreamId: String? = nil
+    var epgId: String? = nil
     
     enum CodingKeys: String, CodingKey {
-        case id, name, logo, group, url, contentType, added, customStreamId = "streamId"
+        case id, name, logo, group, url, contentType, added, customStreamId = "streamId", epgId
     }
     
-    init(name: String, logo: String, group: String, url: String, contentType: String = "live", added: Int? = 0, streamId: String? = nil) {
+    init(name: String, logo: String, group: String, url: String, contentType: String = "live", added: Int? = 0, streamId: String? = nil, epgId: String? = nil) {
         self.id = UUID()
         self.name = name
         self.logo = logo
@@ -82,6 +83,7 @@ struct Channel: Identifiable, Codable, Hashable {
         self.contentType = contentType
         self.added = added ?? 0
         self.customStreamId = streamId
+        self.epgId = epgId
     }
     
     init(from decoder: Decoder) throws {
@@ -94,6 +96,7 @@ struct Channel: Identifiable, Codable, Hashable {
         self.contentType = try container.decodeIfPresent(String.self, forKey: .contentType) ?? "live"
         self.added = try container.decodeIfPresent(Int.self, forKey: .added) ?? 0
         self.customStreamId = try container.decodeIfPresent(String.self, forKey: .customStreamId)
+        self.epgId = try container.decodeIfPresent(String.self, forKey: .epgId)
     }
     
     var streamId: String? {
@@ -118,6 +121,8 @@ struct Channel: Identifiable, Codable, Hashable {
         try container.encode(url, forKey: .url)
         try container.encode(contentType, forKey: .contentType)
         try container.encode(added, forKey: .added)
+        try container.encodeIfPresent(customStreamId, forKey: .customStreamId)
+        try container.encodeIfPresent(epgId, forKey: .epgId)
     }
     
     var safeGroup: String {
@@ -174,6 +179,7 @@ struct XtreamStream: Codable {
     let stream_icon: String?
     let category_id: SafeStringOrInt?
     let container_extension: String?
+    let epg_channel_id: SafeStringOrInt?
 }
 
 struct XtreamLoginResponse: Codable {
@@ -2302,7 +2308,13 @@ struct ContentView: View {
                 // 6. Sliding Channels Drawer Sidebar (Glassmorphic)
                 if showLandscapeChannelList {
                     HStack(spacing: 0) {
-                        Spacer()
+                        Color.black.opacity(0.01)
+                            .ignoresSafeArea()
+                            .onTapGesture {
+                                withAnimation {
+                                    showLandscapeChannelList = false
+                                }
+                            }
                         
                         VStack(alignment: .leading, spacing: 14) {
                             HStack {
@@ -2458,7 +2470,13 @@ struct ContentView: View {
                 // 7. Sliding Settings Drawer Sidebar (Glassmorphic)
                 if showLandscapeSettings {
                     HStack(spacing: 0) {
-                        Spacer()
+                        Color.black.opacity(0.01)
+                            .ignoresSafeArea()
+                            .onTapGesture {
+                                withAnimation {
+                                    showLandscapeSettings = false
+                                }
+                            }
                         
                         VStack(alignment: .leading, spacing: 16) {
                             HStack {
@@ -3426,6 +3444,7 @@ struct ContentView: View {
             var currentName = ""
             var currentGroup = "Genel"
             var currentLogo = ""
+            var currentEpgId: String? = nil
             
             var foundEpgUrl: String? = nil
             if let firstLine = lines.first(where: { $0.hasPrefix("#EXTM3U") }) {
@@ -3468,6 +3487,22 @@ struct ContentView: View {
                         }
                     }
                     
+                    currentEpgId = nil
+                    if let tvgIdRange = clean.range(of: "tvg-id=\"") {
+                        let sub = clean[tvgIdRange.upperBound...]
+                        if let end = sub.range(of: "\"") {
+                            let val = String(sub[..<end.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !val.isEmpty { currentEpgId = val }
+                        }
+                    }
+                    if currentEpgId == nil, let tvgNameRange = clean.range(of: "tvg-name=\"") {
+                        let sub = clean[tvgNameRange.upperBound...]
+                        if let end = sub.range(of: "\"") {
+                            let val = String(sub[..<end.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !val.isEmpty { currentEpgId = val }
+                        }
+                    }
+                    
                     if let comma = clean.range(of: ",", options: .backwards) {
                         currentName = String(clean[comma.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
                     }
@@ -3500,9 +3535,10 @@ struct ContentView: View {
                         contentType = "live"
                     }
                     
-                    loaded.append(Channel(name: currentName, logo: currentLogo, group: currentGroup, url: clean, contentType: contentType))
+                    loaded.append(Channel(name: currentName, logo: currentLogo, group: currentGroup, url: clean, contentType: contentType, epgId: currentEpgId))
                     currentName = ""
                     currentLogo = ""
+                    currentEpgId = nil
                 }
             }
             
@@ -3529,6 +3565,7 @@ struct ContentView: View {
             var currentName = ""
             var currentGroup = "Genel"
             var currentLogo = ""
+            var currentEpgId: String? = nil
             
             DispatchQueue.main.async { self.loadStep2 = true; self.loadingMessage = "Kanallar ayrıştırılıyor..." }
             
@@ -3575,6 +3612,22 @@ struct ContentView: View {
                         }
                     }
                     
+                    currentEpgId = nil
+                    if let tvgIdRange = clean.range(of: "tvg-id=\"") {
+                        let sub = clean[tvgIdRange.upperBound...]
+                        if let end = sub.range(of: "\"") {
+                            let val = String(sub[..<end.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !val.isEmpty { currentEpgId = val }
+                        }
+                    }
+                    if currentEpgId == nil, let tvgNameRange = clean.range(of: "tvg-name=\"") {
+                        let sub = clean[tvgNameRange.upperBound...]
+                        if let end = sub.range(of: "\"") {
+                            let val = String(sub[..<end.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !val.isEmpty { currentEpgId = val }
+                        }
+                    }
+                    
                     // Name parsing
                     if let comma = clean.range(of: ",", options: .backwards) {
                         currentName = String(clean[comma.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3610,9 +3663,10 @@ struct ContentView: View {
                         contentType = "live"
                     }
                     
-                    loaded.append(Channel(name: currentName, logo: currentLogo, group: currentGroup, url: clean, contentType: contentType))
+                    loaded.append(Channel(name: currentName, logo: currentLogo, group: currentGroup, url: clean, contentType: contentType, epgId: currentEpgId))
                     currentName = ""
                     currentLogo = ""
+                    currentEpgId = nil
                 }
             }
             
@@ -3829,7 +3883,8 @@ struct ContentView: View {
                         let grp = fetchedCategories["live_" + catIdStr] ?? "Canlı Yayın"
                         let ext = s.container_extension ?? "ts"
                         let url = "\(cleanHost)/live/\(user)/\(pass)/\(sId).\(ext)"
-                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "live", streamId: String(sId)))
+                        let epgIdStr = s.epg_channel_id?.stringValue
+                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "live", streamId: String(sId), epgId: epgIdStr))
                     }
                 }
                 
@@ -4042,7 +4097,8 @@ struct ContentView: View {
                         let grp = fetchedCategories["live_" + catIdStr] ?? "Canlı Yayın"
                         let ext = s.container_extension ?? "ts"
                         let url = "\(cleanHost)/live/\(user)/\(pass)/\(sId).\(ext)"
-                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "live", streamId: String(sId)))
+                        let epgIdStr = s.epg_channel_id?.stringValue
+                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "live", streamId: String(sId), epgId: epgIdStr))
                     }
                 }
             }.resume()
@@ -4191,56 +4247,79 @@ struct ContentView: View {
                         VStack(spacing: 0) {
                             ForEach(0..<accounts.count, id: \.self) { index in
                                 let acc = accounts[index]
-                                Button(action: {
-                                    switchAccount(to: acc)
-                                    selectedDetailAccount = acc
-                                    providerSheetState = 3
-                                }) {
-                                    HStack {
-                                        ZStack {
-                                            LinearGradient(colors: [Color(hex: "6D28D9"), Color(hex: "007FFF")], startPoint: .topLeading, endPoint: .bottomTrailing)
-                                                .frame(width: 32, height: 32)
-                                                .cornerRadius(8)
+                                HStack(spacing: 0) {
+                                    Button(action: {
+                                        switchAccount(to: acc)
+                                        cacheClearedMessage = "Aktif Sağlayıcı: \(acc.name)"
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                            if cacheClearedMessage?.contains(acc.name) == true {
+                                                cacheClearedMessage = nil
+                                            }
+                                        }
+                                        showAccountsSheet = false
+                                    }) {
+                                        HStack(spacing: 12) {
+                                            ZStack {
+                                                LinearGradient(colors: [Color(hex: "6D28D9"), Color(hex: "007FFF")], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                                    .frame(width: 32, height: 32)
+                                                    .cornerRadius(8)
+                                                
+                                                Image(systemName: acc.mode == 0 ? "doc.richtext" : "server.rack")
+                                                    .foregroundColor(.white)
+                                                    .font(.system(size: 14, weight: .semibold))
+                                            }
                                             
-                                            Image(systemName: acc.mode == 0 ? "doc.richtext" : "server.rack")
-                                                .foregroundColor(.white)
-                                                .font(.system(size: 14, weight: .semibold))
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(acc.name)
+                                                    .font(.system(size: 15, weight: .semibold))
+                                                    .foregroundColor(.white)
+                                                Text(acc.mode == 0 ? "M3U Playlist listesi" : "Xtream Canlı & Sinema")
+                                                    .font(.system(size: 11))
+                                                    .foregroundColor(.white.opacity(0.5))
+                                            }
+                                            
+                                            Spacer()
+                                            
+                                            if activeAccountIdString == acc.id.uuidString {
+                                                Text("AKTİF")
+                                                    .font(.system(size: 10, weight: .bold))
+                                                    .foregroundColor(.green)
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(Color.green.opacity(0.15))
+                                                    .cornerRadius(4)
+                                            }
                                         }
-                                        
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(acc.name)
-                                                .font(.system(size: 16, weight: .semibold))
-                                                .foregroundColor(.white)
-                                            Text(acc.mode == 0 ? "M3U Playlist kütüphanesi" : "Xtream Canlı & Sinema")
-                                                .font(.system(size: 11))
-                                                .foregroundColor(.white.opacity(0.5))
-                                        }
-                                        .padding(.leading, 8)
-                                        
-                                        Spacer()
-                                        
-                                        if activeAccountIdString == acc.id.uuidString {
-                                            Text("AKTİF")
-                                                .font(.system(size: 10, weight: .bold))
-                                                .foregroundColor(.green)
-                                                .padding(.horizontal, 6)
-                                                .padding(.vertical, 2)
-                                                .background(Color.green.opacity(0.15))
-                                                .cornerRadius(4)
-                                                .padding(.trailing, 4)
-                                        }
-                                        
-                                        Image(systemName: "chevron.right")
-                                            .foregroundColor(.white.opacity(0.4))
-                                            .font(.system(size: 14, weight: .semibold))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.vertical, 12)
+                                        .padding(.horizontal, 14)
+                                        .contentShape(Rectangle())
                                     }
-                                    .padding(.vertical, 12)
-                                    .padding(.horizontal, 16)
+                                    .buttonStyle(PlainButtonStyle())
+                                    
+                                    // Custom visual divider line separating actions
+                                    Rectangle()
+                                        .fill(Color.white.opacity(0.12))
+                                        .frame(width: 1, height: 26)
+                                    
+                                    // Settings/Information Gear Button
+                                    Button(action: {
+                                        selectedDetailAccount = acc
+                                        providerSheetState = 3
+                                    }) {
+                                        Image(systemName: "gearshape.fill")
+                                            .font(.system(size: 15))
+                                            .foregroundColor(.white.opacity(0.6))
+                                            .frame(width: 44, height: 44)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
                                 }
+                                
                                 if index < accounts.count - 1 {
-                                    Divider().background(Color.white.opacity(0.1)).padding(.leading, 56)
+                                    Divider().background(Color.white.opacity(0.08)).padding(.leading, 12).padding(.trailing, 12)
                                 }
-                             }
+                            }
                         }
                         .sexyGlass(cornerRadius: 16)
                         .padding(.horizontal, 20)
@@ -5478,8 +5557,45 @@ class EPGManager: ObservableObject {
         }.resume()
     }
     
+    private func normalizedKeys(for channel: Channel) -> [String] {
+        var keys: [String] = []
+        if let epg = channel.epgId?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines), !epg.isEmpty {
+            keys.append(epg)
+            keys.append(epg.replacingOccurrences(of: " ", with: ""))
+        }
+        if let sId = channel.streamId?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines), !sId.isEmpty {
+            keys.append(sId)
+        }
+        
+        let nameLower = channel.name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        keys.append(nameLower)
+        keys.append(nameLower.replacingOccurrences(of: " ", with: ""))
+        
+        // Advanced name normalizer: remove HD, FHD, SD, UHD, 4K, country prefixes like TR:, DE:, etc.
+        var cleanedName = nameLower
+        for prefix in ["tr:", "de:", "us:", "uk:", "fr:", "nl:", "turk:", "turkçe:"] {
+            if cleanedName.hasPrefix(prefix) {
+                cleanedName = cleanedName.replacingOccurrences(of: prefix, with: "")
+            }
+        }
+        for suffix in ["hd", "fhd", "sd", "uhd", "4k", "hevc", "backup", "yayın"] {
+            // strip suffix word
+            cleanedName = cleanedName.replacingOccurrences(of: " " + suffix, with: "")
+            cleanedName = cleanedName.replacingOccurrences(of: "-" + suffix, with: "")
+            cleanedName = cleanedName.replacingOccurrences(of: "[" + suffix + "]", with: "")
+            cleanedName = cleanedName.replacingOccurrences(of: "(" + suffix + ")", with: "")
+        }
+        cleanedName = cleanedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanedName.isEmpty && cleanedName != nameLower {
+            keys.append(cleanedName)
+            keys.append(cleanedName.replacingOccurrences(of: " ", with: ""))
+        }
+        
+        return keys
+    }
+    
     func currentProgramName(for channel: Channel) -> String {
-        let keys = [channel.streamId, channel.name.lowercased(), channel.name.replacingOccurrences(of: " ", with: "")].compactMap { $0 }
+        let keys = normalizedKeys(for: channel)
         for key in keys {
             if let title = currentPrograms[key] { return title }
         }
@@ -5502,7 +5618,7 @@ class EPGManager: ObservableObject {
     }
     
     func nextProgramName(for channel: Channel) -> String {
-        let keys = [channel.streamId, channel.name.lowercased(), channel.name.replacingOccurrences(of: " ", with: "")].compactMap { $0 }
+        let keys = normalizedKeys(for: channel)
         for key in keys {
             if let title = nextPrograms[key] { return title }
         }
@@ -5517,7 +5633,7 @@ class EPGManager: ObservableObject {
     }
     
     func programProgress(for channel: Channel) -> Double {
-        let keys = [channel.streamId, channel.name.lowercased(), channel.name.replacingOccurrences(of: " ", with: "")].compactMap { $0 }
+        let keys = normalizedKeys(for: channel)
         for key in keys {
             if let val = progressPercent[key] { return val }
         }
