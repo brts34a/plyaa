@@ -409,10 +409,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             // Xtream Codes natively supports this and returns an HLS stream which AVPlayer prefers.
             var playableUrlString = normalized
             if playableUrlString.hasSuffix(".ts") {
-                let isXtream = UserDefaults.standard.integer(forKey: "iptv_mode") == 1
-                if isXtream {
-                    playableUrlString = playableUrlString.replacingOccurrences(of: ".ts", with: ".m3u8")
-                }
+                playableUrlString = playableUrlString.replacingOccurrences(of: ".ts", with: ".m3u8")
             }
             
             if let targetUrl = URL(string: playableUrlString) {
@@ -3428,7 +3425,36 @@ struct ContentView: View {
                     self.serverMaxCons = info.max_connections?.stringValue ?? "1"
                     
                     // Update Account metadata
+                    var updated = false
                     if let idx = self.accounts.firstIndex(where: { $0.xtreamHost == cleanHost && $0.xtreamUser == user }) {
+                        self.accounts[idx].status = self.serverStatus
+                        self.accounts[idx].expDate = self.serverExpiry
+                        self.accounts[idx].activeConnections = self.serverActiveCons
+                        self.accounts[idx].maxConnections = self.serverMaxCons
+                        self.saveAccounts()
+                        updated = true
+                    }
+                    
+                    // Also try to find any registered M3U account that contains these credentials and update it!
+                    for i in 0..<self.accounts.count {
+                        if self.accounts[i].mode == 0 {
+                            if let creds = self.extractXtreamCredentials(from: self.accounts[i].m3uUrl) {
+                                let matchHost = creds.host.contains(host) || host.contains(creds.host)
+                                if matchHost && creds.user == user {
+                                    self.accounts[i].status = self.serverStatus
+                                    self.accounts[i].expDate = self.serverExpiry
+                                    self.accounts[i].activeConnections = self.serverActiveCons
+                                    self.accounts[i].maxConnections = self.serverMaxCons
+                                    self.saveAccounts()
+                                    updated = true
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Fallback to active account if not updated yet
+                    if !updated, let activeId = UUID(uuidString: self.activeAccountIdString),
+                       let idx = self.accounts.firstIndex(where: { $0.id == activeId }) {
                         self.accounts[idx].status = self.serverStatus
                         self.accounts[idx].expDate = self.serverExpiry
                         self.accounts[idx].activeConnections = self.serverActiveCons
@@ -4908,9 +4934,25 @@ struct ContentView: View {
                             
                             VStack(spacing: 0) {
                                 let statusText = (acc.status ?? serverStatus).isEmpty ? "AKTİF" : (acc.status ?? serverStatus).uppercased()
-                                let activeConsValue = acc.mode == 1 ? ((acc.activeConnections ?? serverActiveCons).isEmpty ? "0" : (acc.activeConnections ?? serverActiveCons)) : "1"
-                                let maxConsValue = acc.mode == 1 ? ((acc.maxConnections ?? serverMaxCons).isEmpty ? "1" : (acc.maxConnections ?? serverMaxCons)) : "Sınırsız"
-                                let expiryText = acc.mode == 1 ? ((acc.expDate ?? serverExpiry).isEmpty ? "Bilinmiyor" : (acc.expDate ?? serverExpiry)) : "Süresiz"
+                                
+                                // Show real connection details if they exist in the account (both M3U & Xtream) or fallback
+                                let activeConsValue: String = {
+                                    if let ac = acc.activeConnections, !ac.isEmpty { return ac }
+                                    if activeAccountIdString == acc.id.uuidString && !serverActiveCons.isEmpty { return serverActiveCons }
+                                    return acc.mode == 1 ? "0" : "1"
+                                }()
+                                
+                                let maxConsValue: String = {
+                                    if let mc = acc.maxConnections, !mc.isEmpty { return mc }
+                                    if activeAccountIdString == acc.id.uuidString && !serverMaxCons.isEmpty { return serverMaxCons }
+                                    return acc.mode == 1 ? "1" : "Sınırsız"
+                                }()
+                                
+                                let expiryText: String = {
+                                    if let ed = acc.expDate, !ed.isEmpty && ed != "M3U Bağlantısı" { return ed }
+                                    if activeAccountIdString == acc.id.uuidString && !serverExpiry.isEmpty && serverExpiry != "M3U Bağlantısı" { return serverExpiry }
+                                    return "Süresiz"
+                                }()
                                 
                                 HStack {
                                     Image(systemName: "wifi")
