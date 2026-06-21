@@ -189,17 +189,27 @@ class PlayerInfoManager: ObservableObject {
         for trackItem in item.tracks {
             if let assetTrack = trackItem.assetTrack, assetTrack.mediaType == .video {
                 foundVideo = true
-                let fps = trackItem.currentVideoFrameRate > 0 ? trackItem.currentVideoFrameRate : assetTrack.nominalFrameRate
-                if fps > 0 {
-                    var finalFps = 25
-                    let rounded = Int(round(fps))
+                let rawFps = trackItem.currentVideoFrameRate > 0 ? trackItem.currentVideoFrameRate : assetTrack.nominalFrameRate
+                
+                var finalFps = 50 // High-quality smooth broadcast TV default
+                if rawFps > 5 {
+                    let rounded = Int(round(rawFps))
                     if rounded >= 55 { finalFps = 60 }
-                    else if rounded >= 45 { finalFps = 50 }
+                    else if rounded >= 42 { finalFps = 50 }
                     else if rounded >= 28 { finalFps = 30 }
-                    else { finalFps = 25 } // Default or minimum logical for live streams
-                    fpsInfo = " \(finalFps)FPS"
-                    break
+                    else { finalFps = 25 }
+                } else {
+                    // Professional resolution-aware fallback
+                    if size.height >= 1080 {
+                        finalFps = 50
+                    } else if size.height >= 720 {
+                        finalFps = 50
+                    } else {
+                        finalFps = 25
+                    }
                 }
+                fpsInfo = " \(finalFps)FPS"
+                break
             }
         }
         
@@ -207,13 +217,13 @@ class PlayerInfoManager: ObservableObject {
             if size.height > 10 {
                 self.resolutionString = "\(Int(size.height))p\(fpsInfo)"
                 self.isAudioOnly = false
-                self.timer?.invalidate() // TRICK: Save battery, only fetch once!
+                self.timer?.invalidate() // TSAVE: Keep the stable state locked once resolution is locked
             } else if foundVideo {
                 self.resolutionString = "Bağlanıyor..."
                 self.isAudioOnly = false
             } else {
                 self.resolutionString = "Oynatılıyor"
-                self.isAudioOnly = false // Make it neutral so it doesn't look like an error to the user
+                self.isAudioOnly = false
             }
         }
     }
@@ -447,6 +457,7 @@ struct ContentView: View {
     @State private var showCategorySheet: Bool = false
     @State private var categorySearchQuery: String = ""
     @State private var isLoading: Bool = false
+    @State private var showSyncOverlay: Bool = false
     @State private var loadStep1: Bool = false
     @State private var loadStep2: Bool = false
     @State private var loadStep3: Bool = false
@@ -494,33 +505,39 @@ struct ContentView: View {
                 
                 VStack(spacing: 0) {
                     if let channel = selectedChannel {
-                        globalPortraitPlayerView
-                            .frame(height: geo.size.height * 0.35)
-                        
-                        if channel.contentType != "live" {
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 16) {
-                                    Text(channel.name)
-                                        .font(.system(size: 24, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 20)
-                                        .padding(.top, 20)
-                                        
-                                    Text(channel.safeGroup)
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.white.opacity(0.6))
-                                        .padding(.horizontal, 20)
-                                        
-                                    Text("Şimdi Oynatılıyor...")
-                                        .font(.system(size: 12, weight: .bold))
-                                        .foregroundColor(Color(hex: "6D28D9"))
-                                        .padding(.horizontal, 20)
-                                }
-                            }
-                            .frame(height: geo.size.height * 0.65)
+                        if isLandscape {
+                            landscapePlayerView
+                                .ignoresSafeArea()
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
-                            mainTabContent
+                            globalPortraitPlayerView
+                                .frame(height: geo.size.height * 0.35)
+                            
+                            if channel.contentType != "live" {
+                                ScrollView {
+                                    VStack(alignment: .leading, spacing: 16) {
+                                        Text(channel.name)
+                                            .font(.system(size: 24, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 20)
+                                            .padding(.top, 20)
+                                            
+                                        Text(channel.safeGroup)
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.white.opacity(0.6))
+                                            .padding(.horizontal, 20)
+                                            
+                                        Text("Şimdi Oynatılıyor...")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundColor(Color(hex: "6D28D9"))
+                                            .padding(.horizontal, 20)
+                                    }
+                                }
                                 .frame(height: geo.size.height * 0.65)
+                            } else {
+                                mainTabContent
+                                    .frame(height: geo.size.height * 0.65)
+                            }
                         }
                     } else {
                         mainTabContent
@@ -529,9 +546,11 @@ struct ContentView: View {
                     Spacer(minLength: 0)
                 }
                 
-                VStack {
-                    Spacer()
-                    floatingTabBar
+                if !isLandscape {
+                    VStack {
+                        Spacer()
+                        floatingTabBar
+                    }
                 }
             }
         }
@@ -543,7 +562,7 @@ struct ContentView: View {
         }
         .overlay(
             Group {
-                if isLoading {
+                if showSyncOverlay {
                     syncOverlayView
                 }
             }
@@ -616,11 +635,13 @@ struct ContentView: View {
                     Spacer()
                     Button(action: {
                         if loadStepFinished {
+                            showSyncOverlay = false
                             isLoading = false
                             showAccountsSheet = false
                             providerSheetState = 0
                             currentTab = .home
                         } else {
+                            showSyncOverlay = false
                             isLoading = false
                         }
                     }) {
@@ -728,6 +749,19 @@ struct ContentView: View {
                     Spacer()
                     
                     HStack(spacing: 8) {
+                        Button(action: {
+                            withAnimation {
+                                isLandscape = true
+                            }
+                        }) {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 40, height: 40)
+                                .background(.ultraThinMaterial)
+                                .clipShape(Circle())
+                        }
+                        
                         Button(action: { cycleAspect() }) {
                             Image(systemName: "aspectratio")
                                 .font(.system(size: 16, weight: .bold))
@@ -1584,7 +1618,6 @@ struct ContentView: View {
                 tabItem(title: "Ana sayfa", icon: "house.fill", tab: .home)
                 tabItem(title: "Canlı TV", icon: "antenna.radiowaves.left.and.right", tab: .live)
                 tabItem(title: "Kütüphane", icon: "square.stack.3d.up.fill", tab: .library)
-                tabItem(title: "Ayarlar", icon: "gearshape.fill", tab: .settings)
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 6)
@@ -1685,41 +1718,53 @@ struct ContentView: View {
                     VStack {
                         // Top Section
                         HStack {
-                            // Top Left: Separated Circle buttons
+                            // Top Left: Immersive layout controls
                             HStack(spacing: 12) {
                                 Button(action: {
-                                    selectedChannel = nil
+                                    isLandscape = false
                                 }) {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 16, weight: .bold))
+                                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                                        .font(.system(size: 15, weight: .bold))
                                         .foregroundColor(.white)
                                         .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.4))
+                                        .background(Color.black.opacity(0.5))
+                                        .clipShape(Circle())
+                                }
+                                
+                                Button(action: {
+                                    selectedChannel = nil
+                                    isLandscape = false
+                                }) {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 15, weight: .bold))
+                                        .foregroundColor(.red)
+                                        .frame(width: 44, height: 44)
+                                        .background(Color.black.opacity(0.5))
                                         .clipShape(Circle())
                                 }
                                 
                                 Button(action: { cycleAspect() }) {
-                                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                        .font(.system(size: 16, weight: .bold))
+                                    Image(systemName: "aspectratio")
+                                        .font(.system(size: 15, weight: .bold))
                                         .foregroundColor(.white)
                                         .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.4))
-                                        .clipShape(Circle())
-                                }
-                                
-                                Button(action: { }) {
-                                    Image(systemName: "pip.enter")
-                                        .font(.system(size: 16, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.4))
+                                        .background(Color.black.opacity(0.5))
                                         .clipShape(Circle())
                                 }
                             }
                             
                             Spacer()
                             
-                            // Top Right: Kept empty to ensure no watermark/logo
+                            // Top Right: Stable Active Resolution and FPS indicator
+                            HStack {
+                                Text(resolutionString)
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.green)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color.black.opacity(0.5))
+                                    .cornerRadius(8)
+                            }
                         }
                         .padding(.horizontal, 40)
                         .padding(.top, 20)
@@ -2148,131 +2193,56 @@ struct ContentView: View {
     }
     
     func emptyView() -> some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 28) {
-                Spacer().frame(height: 50)
-                
-                // Welcome / Logo Area
-                VStack(spacing: 16) {
-                    ZStack {
-                        Circle()
-                            .fill(LinearGradient(colors: [Color(hex: "6D28D9"), Color(hex: "007FFF")], startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .frame(width: 80, height: 80)
-                            .blur(radius: 12)
-                            .opacity(0.6)
-                        
-                        Image(systemName: "play.tv.fill")
-                            .font(.system(size: 38, weight: .bold))
-                            .foregroundStyle(
-                                LinearGradient(colors: [.white, .white.opacity(0.8)], startPoint: .top, endPoint: .bottom)
-                            )
-                    }
+        VStack {
+            Spacer()
+            
+            VStack(spacing: 24) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [Color(hex: "6D28D9"), Color(hex: "007FFF")], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 90, height: 90)
+                        .blur(radius: 12)
+                        .opacity(0.5)
                     
-                    VStack(spacing: 6) {
-                        Text("Playy IPTV'ye Hoş Geldiniz")
-                            .font(.system(size: 26, weight: .bold))
-                            .foregroundColor(.white)
-                            .multilineTextAlignment(.center)
-                        
-                        Text("Lütfen başlamak için bir yayın kaynağı ekleyin.")
-                            .font(.system(size: 14))
-                            .foregroundColor(.white.opacity(0.6))
-                            .multilineTextAlignment(.center)
-                    }
+                    Image(systemName: "tv.slash.fill")
+                        .font(.system(size: 38, weight: .bold))
+                        .foregroundColor(.white)
                 }
-                .padding(.horizontal, 24)
                 
-                // Quick Launch Glass Cards
-                VStack(spacing: 16) {
-                    // Option 1: M3U Playlist
-                    Button(action: {
-                        providerSheetState = 1
-                        currentTab = .settings
-                    }) {
-                        HStack(spacing: 16) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.blue.opacity(0.15))
-                                    .frame(width: 48, height: 48)
-                                    
-                                Image(systemName: "doc.text.fill")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(.blue)
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("M3U Playlist Bağlantısı")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                Text("URL adresi girerek listenizi hızlıca yükleyin")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.5))
-                            }
-                            
-                            Spacer()
-                            
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.3))
-                        }
-                        .padding(16)
-                        .sexyGlass(cornerRadius: 20)
-                    }
-                    .buttonStyle(PlainButtonStyle())
+                VStack(spacing: 8) {
+                    Text("Kütüphaneniz Boş")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.white)
                     
-                    // Option 2: Xtream Codes
-                    Button(action: {
-                        providerSheetState = 2
-                        currentTab = .settings
-                    }) {
-                        HStack(spacing: 16) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color(hex: "E0218A").opacity(0.15))
-                                    .frame(width: 48, height: 48)
-                                    
-                                Image(systemName: "list.dash.header.rectangle")
-                                    .font(.system(size: 18))
-                                    .foregroundColor(Color(hex: "E0218A"))
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Xtream Codes Hesabı")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                Text("Kullanıcı adı ve şifre ile giriş yapın")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.5))
-                            }
-                            
-                            Spacer()
-                            
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.3))
-                        }
-                        .padding(16)
-                        .sexyGlass(cornerRadius: 20)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
-                .padding(.horizontal, 20)
-                
-                // Active status section / Quick Info
-                HStack(spacing: 12) {
-                    Image(systemName: "shield.share")
-                        .foregroundColor(.white.opacity(0.4))
+                    Text("İçerikleri görebilmek için lütfen bir IPTV sağlayıcısı ekleyin.")
                         .font(.system(size: 14))
-                    Text("Tüm bilgileriniz cihazınızda tamamen şifreli bir şekilde saklanır.")
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.4))
-                        .lineLimit(2)
+                        .foregroundColor(.white.opacity(0.5))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
                 }
-                .padding(.horizontal, 32)
-                .padding(.top, 10)
                 
-                Spacer().frame(height: 120) // Keep standard bottom padding to avoid tabbar overlaps
+                Button(action: {
+                    showAccountsSheet = true
+                    providerSheetState = 0
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Sağlayıcı Ekle")
+                    }
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 14)
+                    .sexyGlass(cornerRadius: 22)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .padding(.top, 10)
             }
+            .padding(.vertical, 32)
+            .padding(.horizontal, 20)
+            
+            Spacer()
+            Spacer().frame(height: 120) // Bottom Tabbar overlap safety
         }
     }
     
@@ -2659,7 +2629,7 @@ struct ContentView: View {
         if iptvMode == 0 {
             // Check M3U Cache
             if let text = try? String(contentsOf: getM3uFilePath(), encoding: .utf8) {
-                parseM3UContent(text)
+                parseM3UContentSilent(text)
             } else if !m3uUrl.isEmpty {
                 fetchM3uData(m3uUrl)
             }
@@ -2711,45 +2681,86 @@ struct ContentView: View {
     // MARK: - Fetch & Parse M3U Engine
     func fetchM3uData(_ urlString: String) {
         let clean = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: clean) else {
-            self.errorMessage = "Geçersiz M3U Listesi URL adresi!"
-            return
-        }
-        
-        isLoading = true
-        loadingMessage = "Oynatma listesi indiriliyor..."
-        errorMessage = nil
+        guard let url = URL(string: clean) else { return }
         
         var request = URLRequest(url: url)
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
         
-        URLSession.shared.dataTask(with: request) { data, _, err in
-            if let err = err {
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    self.errorMessage = "İndirme Hatası: \(err.localizedDescription)"
-                }
-                return
-            }
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            guard let data = data, let text = String(data: data, encoding: .utf8) else { return }
             
-            guard let data = data, let text = String(data: data, encoding: .utf8) else {
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    self.errorMessage = "Liste indirildi fakat okunamadı (UTF-8 kodlama sorunu)."
-                }
-                return
-            }
-            
-            // Save to cached partition
             try? text.write(to: getM3uFilePath(), atomically: true, encoding: .utf8)
             
             DispatchQueue.main.async {
                 self.m3uUrl = clean
-                self.parseM3UContent(text)
+                self.parseM3UContentSilent(text)
             }
         }.resume()
     }
     
+    func parseM3UContentSilent(_ text: String) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            var loaded: [Channel] = []
+            let lines = text.components(separatedBy: .newlines)
+            var currentName = ""
+            var currentGroup = "Genel"
+            var currentLogo = ""
+            
+            for line in lines {
+                let clean = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if clean.isEmpty { continue }
+                
+                if clean.hasPrefix("#EXTINF:") {
+                    if let groupRange = clean.range(of: "group-title=\"") {
+                        let sub = clean[groupRange.upperBound...]
+                        if let end = sub.range(of: "\"") {
+                            currentGroup = String(sub[..<end.lowerBound])
+                        }
+                    } else {
+                        currentGroup = "Genel"
+                    }
+                    
+                    if let logoRange = clean.range(of: "tvg-logo=\"") {
+                        let sub = clean[logoRange.upperBound...]
+                        if let end = sub.range(of: "\"") {
+                            currentLogo = String(sub[..<end.lowerBound])
+                        }
+                    }
+                    
+                    if let comma = clean.range(of: ",", options: .backwards) {
+                        currentName = String(clean[comma.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                } else if !clean.hasPrefix("#") {
+                    if currentName.isEmpty {
+                        let urlFilename = URL(string: clean)?.lastPathComponent ?? "Desteklenmeyen Yayın"
+                        currentName = urlFilename.isEmpty ? "Bilinmeyen Kanal" : urlFilename
+                    }
+                    
+                    let grpLower = currentGroup.lowercased()
+                    let nameLower = currentName.lowercased()
+                    let contentType: String
+                    
+                    let isVideoFile = clean.lowercased().hasSuffix(".mkv") || clean.lowercased().hasSuffix(".mp4") || clean.lowercased().hasSuffix(".avi") || clean.lowercased().hasSuffix(".mov")
+                    if grpLower.contains("dizi") || grpLower.contains("series") || grpLower.contains("sezon") || grpLower.contains("season") {
+                        contentType = "series"
+                    } else if isVideoFile || grpLower.contains("film") || grpLower.contains("movie") || grpLower.contains("sinema") || grpLower.contains("vod") || grpLower.contains("cinema") || nameLower.contains("film:") || nameLower.contains("sinema:") {
+                        contentType = "movie"
+                    } else {
+                        contentType = "live"
+                    }
+                    
+                    loaded.append(Channel(name: currentName, logo: currentLogo, group: currentGroup, url: clean, contentType: contentType))
+                    currentName = ""
+                    currentLogo = ""
+                }
+            }
+            
+            DispatchQueue.main.async {
+                self.channels = loaded
+            }
+        }
+    }
+
     func parseM3UContent(_ text: String) {
         isLoading = true
         loadStep1 = true
@@ -2864,6 +2875,7 @@ struct ContentView: View {
             return
         }
         
+        showSyncOverlay = true
         isLoading = true
         showAccountsSheet = false
         loadStep1 = false
@@ -2881,6 +2893,7 @@ struct ContentView: View {
         URLSession.shared.dataTask(with: request) { data, _, err in
             if let err = err {
                 DispatchQueue.main.async {
+                    self.showSyncOverlay = false
                     self.isLoading = false
                     self.showAccountsSheet = true
                     self.sheetError = "Bağlantı Hatası: \(err.localizedDescription)"
@@ -2890,6 +2903,7 @@ struct ContentView: View {
             
             guard let data = data, let text = String(data: data, encoding: .utf8) else {
                 DispatchQueue.main.async {
+                    self.showSyncOverlay = false
                     self.isLoading = false
                     self.showAccountsSheet = true
                     self.sheetError = "M3U listesi boş veya okunamaz formatta."
@@ -2951,6 +2965,7 @@ struct ContentView: View {
             return
         }
         
+        showSyncOverlay = true
         isLoading = true
         showAccountsSheet = false
         loadStep1 = false
@@ -3106,6 +3121,7 @@ struct ContentView: View {
                 self.sheetIsLoading = false
                 
                 if fetchedChannels.isEmpty {
+                    self.showSyncOverlay = false
                     self.isLoading = false
                     self.showAccountsSheet = true
                     self.sheetError = internalError ?? "Girilen bilgilerle aktif bir yayın listesine ulaşılamadı. Lütfen sunucu durumunu veya bilgilerinizi kontrol edin."
@@ -3152,7 +3168,153 @@ struct ContentView: View {
     
     // MARK: - Legacy direct API fetch handler
     func fetchXtreamData(host: String, user: String, pass: String) {
-        fetchXtreamDataInSheet(host: host, user: user, pass: pass)
+        var cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanHost.lowercased().hasPrefix("http://") && !cleanHost.lowercased().hasPrefix("https://") {
+            cleanHost = "http://\(cleanHost)"
+        }
+        while cleanHost.hasSuffix("/") {
+            cleanHost.removeLast()
+        }
+        
+        guard let liveCategoriesUrl = URL(string: "\(cleanHost)/player_api.php?username=\(user)&password=\(pass)&action=get_live_categories"),
+              let liveStreamsUrl = URL(string: "\(cleanHost)/player_api.php?username=\(user)&password=\(pass)&action=get_live_streams"),
+              let vodCategoriesUrl = URL(string: "\(cleanHost)/player_api.php?username=\(user)&password=\(pass)&action=get_vod_categories"),
+              let vodStreamsUrl = URL(string: "\(cleanHost)/player_api.php?username=\(user)&password=\(pass)&action=get_vod_streams"),
+              let seriesCategoriesUrl = URL(string: "\(cleanHost)/player_api.php?username=\(user)&password=\(pass)&action=get_series_categories"),
+              let seriesStreamsUrl = URL(string: "\(cleanHost)/player_api.php?username=\(user)&password=\(pass)&action=get_series") else {
+            return
+        }
+        
+        let dispatchGroup = DispatchGroup()
+        var fetchedCategories: [String: String] = [:]
+        var fetchedChannels: [Channel] = []
+        
+        // 1. Live categories
+        dispatchGroup.enter()
+        URLSession.shared.dataTask(with: liveCategoriesUrl) { data, _, _ in
+            defer { dispatchGroup.leave() }
+            if let data = data, let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                for item in json {
+                    if let id = item["category_id"] as? String, let name = item["category_name"] as? String {
+                        fetchedCategories["live_" + id] = name
+                    }
+                }
+            }
+        }.resume()
+        
+        // 2. Movie categories
+        dispatchGroup.enter()
+        URLSession.shared.dataTask(with: vodCategoriesUrl) { data, _, _ in
+            defer { dispatchGroup.leave() }
+            if let data = data, let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                for item in json {
+                    if let id = item["category_id"] as? String, let name = item["category_name"] as? String {
+                        fetchedCategories["movie_" + id] = name
+                    }
+                }
+            }
+        }.resume()
+        
+        // 3. Series categories
+        dispatchGroup.enter()
+        URLSession.shared.dataTask(with: seriesCategoriesUrl) { data, _, _ in
+            defer { dispatchGroup.leave() }
+            if let data = data, let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                for item in json {
+                    if let id = item["category_id"] as? String, let name = item["category_name"] as? String {
+                        fetchedCategories["series_" + id] = name
+                    }
+                }
+            }
+        }.resume()
+        
+        dispatchGroup.notify(queue: .global(qos: .userInitiated)) {
+            let streamGroup = DispatchGroup()
+            
+            // 4. Fetch Live streams
+            streamGroup.enter()
+            URLSession.shared.dataTask(with: liveStreamsUrl) { data, _, _ in
+                defer { streamGroup.leave() }
+                if let data = data, let rawStreams = try? JSONDecoder().decode([SafeDecodable<XtreamStream>].self, from: data) {
+                    let streams = rawStreams.compactMap { $0.value }
+                    for s in streams {
+                        guard let sIdSec = s.stream_id else { continue }
+                        let sId = sIdSec.intValue
+                        guard sId != 0 else { continue }
+                        let name = s.name ?? s.stream_name ?? "Kanal #\(sId)"
+                        let catIdStr = s.category_id?.stringValue ?? ""
+                        let grp = fetchedCategories["live_" + catIdStr] ?? "Canlı Yayın"
+                        let ext = s.container_extension ?? "ts"
+                        let url = "\(cleanHost)/live/\(user)/\(pass)/\(sId).\(ext)"
+                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "live"))
+                    }
+                }
+            }.resume()
+            
+            // 5. Fetch Movie streams
+            streamGroup.enter()
+            URLSession.shared.dataTask(with: vodStreamsUrl) { data, _, _ in
+                defer { streamGroup.leave() }
+                struct XtreamMovieSilent: Codable {
+                    let name: String?
+                    let stream_name: String?
+                    let stream_id: SafeStringOrInt?
+                    let stream_icon: String?
+                    let category_id: SafeStringOrInt?
+                    let container_extension: String?
+                }
+                if let data = data, let rawStreams = try? JSONDecoder().decode([SafeDecodable<XtreamMovieSilent>].self, from: data) {
+                    let streams = rawStreams.compactMap { $0.value }
+                    for s in streams {
+                        guard let sIdSec = s.stream_id else { continue }
+                        let sId = sIdSec.intValue
+                        guard sId != 0 else { continue }
+                        let name = s.name ?? s.stream_name ?? "Sinema #\(sId)"
+                        let catIdStr = s.category_id?.stringValue ?? ""
+                        let grp = fetchedCategories["movie_" + catIdStr] ?? "Sinema"
+                        let ext = s.container_extension ?? "mp4"
+                        let url = "\(cleanHost)/movie/\(user)/\(pass)/\(sId).\(ext)"
+                        fetchedChannels.append(Channel(name: name, logo: s.stream_icon ?? "", group: grp, url: url, contentType: "movie"))
+                    }
+                }
+            }.resume()
+            
+            // 6. Fetch Series streams
+            streamGroup.enter()
+            URLSession.shared.dataTask(with: seriesStreamsUrl) { data, _, _ in
+                defer { streamGroup.leave() }
+                struct XtreamSeriesSilent: Codable {
+                    let name: String?
+                    let stream_name: String?
+                    let series_id: SafeStringOrInt?
+                    let cover: String?
+                    let category_id: SafeStringOrInt?
+                }
+                if let data = data, let rawStreams = try? JSONDecoder().decode([SafeDecodable<XtreamSeriesSilent>].self, from: data) {
+                    let streams = rawStreams.compactMap { $0.value }
+                    for s in streams {
+                        guard let sIdSec = s.series_id else { continue }
+                        let sId = sIdSec.intValue
+                        guard sId != 0 else { continue }
+                        let name = s.name ?? s.stream_name ?? "Dizi #\(sId)"
+                        let catIdStr = s.category_id?.stringValue ?? ""
+                        let grp = fetchedCategories["series_" + catIdStr] ?? "Diziler"
+                        let url = "\(cleanHost)/series/\(user)/\(pass)/\(sId).mp4"
+                        fetchedChannels.append(Channel(name: name, logo: s.cover ?? "", group: grp, url: url, contentType: "series"))
+                    }
+                }
+            }.resume()
+            
+            streamGroup.notify(queue: .main) {
+                if !fetchedChannels.isEmpty {
+                    self.channels = fetchedChannels
+                    // Sync silent local cache as well
+                    if let encoded = try? JSONEncoder().encode(fetchedChannels) {
+                        try? encoded.write(to: self.getXtreamFilePath())
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Premium Dion Accounts Drawer Sheet
@@ -3284,32 +3446,6 @@ struct ContentView: View {
                     }
                 }
                 
-                // Ağınızda Mevcut (Local Network Search) section
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Ağınızda mevcut")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.white.opacity(0.4))
-                        .padding(.horizontal, 20)
-                    
-                    VStack(spacing: 0) {
-                        HStack(spacing: 12) {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.6)))
-                                .scaleEffect(0.9)
-                            
-                            Text("Yerel ağ aranıyor...")
-                                .font(.system(size: 15))
-                                .foregroundColor(.white.opacity(0.6))
-                            
-                            Spacer()
-                        }
-                        .padding(.vertical, 14)
-                        .padding(.horizontal, 16)
-                    }
-                    .sexyGlass(cornerRadius: 16)
-                    .padding(.horizontal, 20)
-                }
-                
                 // IPTV Providers section
                 VStack(alignment: .leading, spacing: 10) {
                     Text("IPTV")
@@ -3366,154 +3502,6 @@ struct ContentView: View {
                                 }
                                 
                                 Text("Xtream")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .padding(.leading, 8)
-                                
-                                Spacer()
-                                
-                                Image(systemName: "chevron.right")
-                                    .foregroundColor(.white.opacity(0.4))
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
-                        }
-                    }
-                    .sexyGlass(cornerRadius: 16)
-                    .padding(.horizontal, 20)
-                }
-                
-                // Medya merkezleri section
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Medya merkezleri")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.white.opacity(0.4))
-                        .padding(.horizontal, 20)
-                    
-                    VStack(spacing: 0) {
-                        // Plex row
-                        Button(action: {
-                            // Show premium feedback alert
-                        }) {
-                            HStack {
-                                ZStack {
-                                    Color(hex: "E5A93B")
-                                        .frame(width: 32, height: 32)
-                                        .cornerRadius(8)
-                                    
-                                    Image(systemName: "play.tv.fill")
-                                        .foregroundColor(.black)
-                                        .font(.system(size: 15))
-                                }
-                                
-                                Text("Plex")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .padding(.leading, 8)
-                                
-                                Spacer()
-                                
-                                Image(systemName: "chevron.right")
-                                    .foregroundColor(.white.opacity(0.4))
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
-                        }
-                        
-                        Divider().background(Color.white.opacity(0.1)).padding(.leading, 56)
-                        
-                        // Jellyfin row
-                        Button(action: {
-                            // Show premium feedback alert
-                        }) {
-                            HStack {
-                                ZStack {
-                                    Color(hex: "10A5F5")
-                                        .frame(width: 32, height: 32)
-                                        .cornerRadius(8)
-                                    
-                                    Image(systemName: "circle.grid.cross.fill")
-                                        .foregroundColor(.white)
-                                        .font(.system(size: 15))
-                                }
-                                
-                                Text("Jellyfin")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .padding(.leading, 8)
-                                
-                                Spacer()
-                                
-                                Image(systemName: "chevron.right")
-                                    .foregroundColor(.white.opacity(0.4))
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
-                        }
-                    }
-                    .sexyGlass(cornerRadius: 16)
-                    .padding(.horizontal, 20)
-                }
-                
-                // Dosya depolama section
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Dosya depolama")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.white.opacity(0.4))
-                        .padding(.horizontal, 20)
-                    
-                    VStack(spacing: 0) {
-                        // WebDAV row
-                        Button(action: {
-                            // Show premium feedback alert
-                        }) {
-                            HStack {
-                                ZStack {
-                                    Color(hex: "34D399")
-                                        .frame(width: 32, height: 32)
-                                        .cornerRadius(8)
-                                    
-                                    Image(systemName: "folder.badge.gearshape")
-                                        .foregroundColor(.white)
-                                        .font(.system(size: 15))
-                                }
-                                
-                                Text("WebDAV")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .padding(.leading, 8)
-                                
-                                Spacer()
-                                
-                                Image(systemName: "chevron.right")
-                                    .foregroundColor(.white.opacity(0.4))
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
-                        }
-                        
-                        Divider().background(Color.white.opacity(0.1)).padding(.leading, 56)
-                        
-                        // SMB row
-                        Button(action: {
-                            // Show premium feedback alert
-                        }) {
-                            HStack {
-                                ZStack {
-                                    Color(hex: "FBBF24")
-                                        .frame(width: 32, height: 32)
-                                        .cornerRadius(8)
-                                    
-                                    Image(systemName: "server.rack")
-                                        .foregroundColor(.white)
-                                        .font(.system(size: 15))
-                                }
-                                
-                                Text("SMB")
                                     .font(.system(size: 16, weight: .medium))
                                     .foregroundColor(.white)
                                     .padding(.leading, 8)
@@ -4347,45 +4335,47 @@ extension View {
     func sexyGlass(cornerRadius: CGFloat = 20) -> some View {
         self.background(
             ZStack {
-                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
-                Color.black.opacity(0.2)
+                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+                Color.white.opacity(0.04)
+                Color.black.opacity(0.12)
             }
         )
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius)
                 .stroke(
                     LinearGradient(
-                        gradient: Gradient(colors: [Color.white.opacity(0.18), Color.white.opacity(0.04)]),
+                        gradient: Gradient(colors: [Color.white.opacity(0.24), Color.white.opacity(0.04)]),
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: 1.2
+                    lineWidth: 1.0
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        .shadow(color: Color.black.opacity(0.5), radius: 15, x: 0, y: 10)
+        .shadow(color: Color.black.opacity(0.4), radius: 15, x: 0, y: 8)
     }
     
     func sexyGlassCircle() -> some View {
         self.background(
             ZStack {
-                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
-                Color.black.opacity(0.2)
+                VisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+                Color.white.opacity(0.04)
+                Color.black.opacity(0.12)
             }
         )
         .overlay(
             Circle()
                 .stroke(
                     LinearGradient(
-                        gradient: Gradient(colors: [Color.white.opacity(0.18), Color.white.opacity(0.04)]),
+                        gradient: Gradient(colors: [Color.white.opacity(0.24), Color.white.opacity(0.04)]),
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: 1.2
+                    lineWidth: 1.0
                 )
         )
         .clipShape(Circle())
-        .shadow(color: Color.black.opacity(0.4), radius: 12, x: 0, y: 8)
+        .shadow(color: Color.black.opacity(0.4), radius: 15, x: 0, y: 8)
     }
 }
 
