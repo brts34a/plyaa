@@ -56,6 +56,7 @@ struct IPTVAccount: Identifiable, Codable, Equatable {
     var maxConnections: String?
     var activeConnections: String?
     var status: String?
+    var epgUrl: String?
 }
 
 struct Channel: Identifiable, Codable, Hashable {
@@ -188,12 +189,38 @@ class PlayerInfoManager: ObservableObject {
     var hideTimer: Timer?
     
     func start(player: AVPlayer?) {
+        self.player?.removeObserver(self, forKeyPath: "rate")
         self.player = player
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
             self?.update()
         }
+        
+        self.player?.addObserver(self, forKeyPath: "rate", options: [.new, .initial], context: nil)
+        
         userTapped() // initial show
+    }
+    
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+        if keyPath == "rate" {
+            if let player = self.player {
+                DispatchQueue.main.async {
+                    let newIsPlaying = player.rate != 0
+                    if self.isPlaying != newIsPlaying {
+                        self.isPlaying = newIsPlaying
+                    }
+                }
+            }
+        }
+    }
+    
+    func togglePlayPause() {
+        guard let p = player else { return }
+        if p.rate != 0 {
+            p.pause()
+        } else {
+            p.play()
+        }
     }
     
     func userTapped() {
@@ -213,6 +240,7 @@ class PlayerInfoManager: ObservableObject {
     func stop() {
         timer?.invalidate()
         hideTimer?.invalidate()
+        player?.removeObserver(self, forKeyPath: "rate")
         player?.pause()
         player = nil
         DispatchQueue.main.async {
@@ -262,16 +290,23 @@ class PlayerInfoManager: ObservableObject {
         }
         
         DispatchQueue.main.async {
+            let newResString: String
+            let newAudioOnly = false
+            
             if size.height > 10 {
-                self.resolutionString = "\(Int(size.height))p\(fpsInfo)"
-                self.isAudioOnly = false
+                newResString = "\(Int(size.height))p\(fpsInfo)"
                 self.timer?.invalidate() // TSAVE: Keep the stable state locked once resolution is locked
             } else if foundVideo {
-                self.resolutionString = "Bağlanıyor..."
-                self.isAudioOnly = false
+                newResString = "Bağlanıyor..."
             } else {
-                self.resolutionString = "Oynatılıyor"
-                self.isAudioOnly = false
+                newResString = "Oynatılıyor"
+            }
+            
+            if self.resolutionString != newResString {
+                self.resolutionString = newResString
+            }
+            if self.isAudioOnly != newAudioOnly {
+                self.isAudioOnly = newAudioOnly
             }
         }
     }
@@ -525,6 +560,7 @@ struct ContentView: View {
     
     // Sheet Local States
     @State private var tempM3uUrl: String = ""
+    @State private var tempM3uEpgUrl: String = ""
     @State private var tempXtreamHost: String = ""
     @State private var tempXtreamUser: String = ""
     @State private var tempXtreamPass: String = ""
@@ -532,6 +568,7 @@ struct ContentView: View {
     @State private var tempEditUrl: String = ""
     @State private var tempEditUser: String = ""
     @State private var tempEditPass: String = ""
+    @State private var tempEditEpgUrl: String = ""
     @State private var sheetIsLoading: Bool = false
     @State private var sheetLoadingMessage: String = ""
     @State private var sheetError: String? = nil
@@ -541,6 +578,7 @@ struct ContentView: View {
     enum AppTab { case home, live, library, search, settings }
     @State private var currentTab: AppTab = .home
     @State private var isLandscape: Bool = false
+    @State private var isInitializingChannels: Bool = true
     @State private var showLandscapeChannelList: Bool = false
     @State private var landscapeSearchQuery: String = ""
     @State private var selectedLandscapeGroup: String = "Tümü"
@@ -766,13 +804,13 @@ struct ContentView: View {
         Group {
             switch currentTab {
             case .home:
-                if channels.isEmpty { emptyView() } else { homeTabContent }
+                if isInitializingChannels { initializingView() } else if channels.isEmpty { emptyView() } else { homeTabContent }
             case .live:
-                if channels.isEmpty { emptyView() } else { liveTVTabContent }
+                if isInitializingChannels { initializingView() } else if channels.isEmpty { emptyView() } else { liveTVTabContent }
             case .library:
-                if channels.isEmpty { emptyView() } else { libraryTabContent }
+                if isInitializingChannels { initializingView() } else if channels.isEmpty { emptyView() } else { libraryTabContent }
             case .search:
-                if channels.isEmpty { emptyView() } else { searchTabContent }
+                if isInitializingChannels { initializingView() } else if channels.isEmpty { emptyView() } else { searchTabContent }
             case .settings:
                 accountsDrawerSheet
             }
@@ -955,7 +993,7 @@ struct ContentView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
                 
-                let liveGroups = Array(Set(channels.filter({ $0.contentType == "live" }).map({ $0.safeGroup }))).sorted()
+                let liveGroups = UniqueChannelsCache.getGroups(for: "live", channels: channels)
                 
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                     ForEach(liveGroups, id: \.self) { group in
@@ -1170,10 +1208,10 @@ struct ContentView: View {
                         libraryHorizontalPortraitSection(title: "Son eklenen filmler", items: recentMovies)
                     }
                 } else if libraryFilter == "Filmler" {
-                    let movieGroups = Array(Set(channels.filter({ $0.contentType == "movie" }).map({ $0.safeGroup }))).sorted()
+                    let movieGroups = UniqueChannelsCache.getGroups(for: "movie", channels: channels)
                     libraryCategoryGrid(groups: movieGroups)
                 } else if libraryFilter == "Diziler" {
-                    let seriesGroups = Array(Set(channels.filter({ $0.contentType == "series" }).map({ $0.safeGroup }))).sorted()
+                    let seriesGroups = UniqueChannelsCache.getGroups(for: "series", channels: channels)
                     libraryCategoryGrid(groups: seriesGroups)
                 }
                 
@@ -1312,21 +1350,43 @@ struct ContentView: View {
                         Button(action: {
                             selectedChannel = channel
                         }) {
-                            Group {
-                                if !channel.logo.isEmpty, let url = URL(string: channel.logo) {
-                                    AsyncImage(url: url) { phase in
-                                        if let image = phase.image {
-                                            image.resizable().aspectRatio(contentMode: .fill)
-                                        } else {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Group {
+                                    if !channel.logo.isEmpty, let url = URL(string: channel.logo) {
+                                        AsyncImage(url: url) { phase in
+                                            if let image = phase.image {
+                                                image.resizable().aspectRatio(contentMode: .fill)
+                                            } else {
+                                                ZStack {
+                                                    Color.white.opacity(0.1)
+                                                    Image(systemName: "film")
+                                                        .foregroundColor(.white.opacity(0.5))
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        ZStack {
                                             Color.white.opacity(0.1)
+                                            Image(systemName: "film")
+                                                .foregroundColor(.white.opacity(0.5))
                                         }
                                     }
-                                } else {
-                                    Color.white.opacity(0.1)
                                 }
+                                .frame(width: 120, height: 170)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                
+                                Text(channel.name)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                    .frame(width: 120, alignment: .leading)
+                                
+                                Text(channel.safeGroup)
+                                    .font(.system(size: 11, weight: .regular))
+                                    .foregroundColor(.white.opacity(0.5))
+                                    .lineLimit(1)
+                                    .frame(width: 120, alignment: .leading)
                             }
-                            .frame(width: 120, height: 180)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
                         .buttonStyle(PlainButtonStyle())
                         .padding(.leading, index == 0 ? 20 : 0)
@@ -1894,37 +1954,26 @@ struct ContentView: View {
                 NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo, showsPlaybackControls: false)
                     .ignoresSafeArea()
                 
-                // 2. Base Tap-to-toggle overlay (propagates when clicking empty space)
-                Color.black.opacity(0.005)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        withAnimation {
-                            showingControls.toggle()
-                        }
-                        if showingControls {
-                            resetTimer()
-                        }
-                    }
-                
-                // 3. Left/Right Gestures for Brightness/Volume (elevated above black overlay to prevent cancelation/block of drag event)
+                // 2 & 3. Base Tap-to-toggle overlay & Swipe Gestures (Brightness/Volume)
                 GeometryReader { geo in
-                    HStack(spacing: 0) {
-                        // Left 22% area: Brightness drag
-                        Color.black.opacity(0.005)
-                            .frame(width: geo.size.width * 0.22)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                withAnimation {
-                                    showingControls.toggle()
-                                }
-                                if showingControls {
-                                    resetTimer()
-                                }
+                    Color.black.opacity(0.005)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation {
+                                showingControls.toggle()
                             }
-                            .gesture(
-                                DragGesture(minimumDistance: 10)
-                                    .onChanged { value in
-                                        if showLandscapeChannelList || showLandscapeSettings { return }
+                            if showingControls {
+                                resetTimer()
+                            }
+                        }
+                        .gesture(
+                            DragGesture(minimumDistance: 10)
+                                .onChanged { value in
+                                    if showLandscapeChannelList || showLandscapeSettings { return }
+                                    
+                                    let isLeft = value.startLocation.x < geo.size.width / 2
+                                    
+                                    if isLeft {
                                         if !showBrightnessPill {
                                             dragStartBrightness = brightnessLevel
                                             withAnimation {
@@ -1936,34 +1985,7 @@ struct ContentView: View {
                                         let delta = value.translation.height / -250.0
                                         brightnessLevel = max(0.0, min(1.0, dragStartBrightness + delta))
                                         UIScreen.main.brightness = brightnessLevel
-                                    }
-                                    .onEnded { _ in
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                            withAnimation {
-                                                showBrightnessPill = false
-                                            }
-                                        }
-                                    }
-                            )
-                        
-                        Spacer()
-                        
-                        // Right 22% area: Volume drag
-                        Color.black.opacity(0.005)
-                            .frame(width: geo.size.width * 0.22)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                withAnimation {
-                                    showingControls.toggle()
-                                }
-                                if showingControls {
-                                    resetTimer()
-                                }
-                            }
-                            .gesture(
-                                DragGesture(minimumDistance: 10)
-                                    .onChanged { value in
-                                        if showLandscapeChannelList || showLandscapeSettings { return }
+                                    } else {
                                         if !showVolumePill {
                                             dragStartVolume = volumeLevel
                                             withAnimation {
@@ -1975,17 +1997,18 @@ struct ContentView: View {
                                         let delta = value.translation.height / -250.0
                                         volumeLevel = max(0.0, min(1.0, dragStartVolume + delta))
                                     }
-                                    .onEnded { _ in
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                            withAnimation {
-                                                showVolumePill = false
-                                            }
+                                }
+                                .onEnded { value in
+                                    let isLeft = value.startLocation.x < geo.size.width / 2
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                        withAnimation {
+                                            if isLeft { showBrightnessPill = false }
+                                            else { showVolumePill = false }
                                         }
                                     }
-                            )
-                    }
+                                }
+                        )
                 }
-                .ignoresSafeArea()
                 .zIndex(15)
                 
                 // 4. Vertical Sliding Indicators (Left: Brightness, Right: Volume)
@@ -2054,13 +2077,14 @@ struct ContentView: View {
                 
                 // 5. Controls Overlay (Top section, Center section, Bottom section)
                 if showingControls {
-                    Color.black.opacity(0.35).ignoresSafeArea() // safe dim background behind overlay
-                        .onTapGesture {
-                            withAnimation {
-                                showingControls = false
-                            }
-                        }
-                        .zIndex(90)
+                    LinearGradient(
+                        gradient: Gradient(colors: [Color.black.opacity(0.6), Color.clear, Color.black.opacity(0.8)]),
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false) // Let touches pass through to gesture overlay
+                    .zIndex(90)
                     
                     VStack {
                         // Top Section (Top bar buttons & resolution info)
@@ -2075,7 +2099,8 @@ struct ContentView: View {
                                         .font(.system(size: 14, weight: .bold))
                                         .foregroundColor(.white)
                                         .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.45))
+                                        .background(.ultraThinMaterial)
+                                        .environment(\.colorScheme, .dark)
                                         .clipShape(Circle())
                                 }
                                 
@@ -2088,7 +2113,8 @@ struct ContentView: View {
                                         .font(.system(size: 14, weight: .bold))
                                         .foregroundColor(.red)
                                         .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.45))
+                                        .background(.ultraThinMaterial)
+                                        .environment(\.colorScheme, .dark)
                                         .clipShape(Circle())
                                 }
                                 
@@ -2097,7 +2123,8 @@ struct ContentView: View {
                                         .font(.system(size: 14, weight: .bold))
                                         .foregroundColor(.white)
                                         .frame(width: 44, height: 44)
-                                        .background(Color.black.opacity(0.45))
+                                        .background(.ultraThinMaterial)
+                                        .environment(\.colorScheme, .dark)
                                         .clipShape(Circle())
                                 }
                             }
@@ -2114,7 +2141,8 @@ struct ContentView: View {
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(Color.black.opacity(0.55))
+                            .background(.ultraThinMaterial)
+                            .environment(\.colorScheme, .dark)
                             .cornerRadius(8)
                         }
                         .padding(.horizontal, 40)
@@ -2125,19 +2153,15 @@ struct ContentView: View {
                         // Center Section (Play / Pause button)
                         HStack {
                             Button(action: {
-                                if globalPlayerInfo.isPlaying {
-                                    globalPlayerInfo.player?.pause()
-                                } else {
-                                    globalPlayerInfo.player?.play()
-                                }
-                                globalPlayerInfo.isPlaying.toggle()
+                                globalPlayerInfo.togglePlayPause()
                                 resetTimer()
                             }) {
                                 Image(systemName: globalPlayerInfo.isPlaying ? "pause.fill" : "play.fill")
                                     .font(.system(size: 38, weight: .bold))
                                     .foregroundColor(.white)
                                     .frame(width: 74, height: 74)
-                                    .background(Color.black.opacity(0.35))
+                                    .background(.ultraThinMaterial)
+                                    .environment(\.colorScheme, .dark)
                                     .clipShape(Circle())
                                     .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
                             }
@@ -2301,55 +2325,76 @@ struct ContentView: View {
                             .cornerRadius(10)
                             .padding(.horizontal, 16)
                             
-                            ScrollView {
-                                LazyVStack(spacing: 8) {
-                                    ForEach(landscapeFilteredChannels.prefix(120), id: \.self) { ch in
-                                        Button(action: {
-                                            selectedChannel = ch
-                                            resetTimer()
-                                        }) {
-                                            HStack(spacing: 12) {
-                                                if !ch.logo.isEmpty, let url = URL(string: ch.logo) {
-                                                    AsyncImage(url: url) { phase in
-                                                        if let img = phase.image {
-                                                            img.resizable().scaledToFit()
-                                                        } else {
-                                                            Image(systemName: ch.contentType == "live" ? "antenna.radiowaves.left.and.right" : "film")
-                                                                .foregroundColor(.white.opacity(0.3))
+                            ScrollViewReader { proxy in
+                                ScrollView {
+                                    LazyVStack(spacing: 8) {
+                                        ForEach(landscapeFilteredChannels, id: \.self) { ch in
+                                            Button(action: {
+                                                selectedChannel = ch
+                                                resetTimer()
+                                            }) {
+                                                HStack(spacing: 12) {
+                                                    if !ch.logo.isEmpty, let url = URL(string: ch.logo) {
+                                                        AsyncImage(url: url) { phase in
+                                                            if let img = phase.image {
+                                                                img.resizable().scaledToFit()
+                                                            } else {
+                                                                Image(systemName: ch.contentType == "live" ? "antenna.radiowaves.left.and.right" : "film")
+                                                                    .foregroundColor(.white.opacity(0.3))
+                                                            }
                                                         }
-                                                    }
-                                                    .frame(width: 32, height: 32)
-                                                    .cornerRadius(4)
-                                                } else {
-                                                    Image(systemName: ch.contentType == "live" ? "antenna.radiowaves.left.and.right" : "film")
-                                                        .foregroundColor(.white.opacity(0.3))
                                                         .frame(width: 32, height: 32)
-                                                }
-                                                
-                                                VStack(alignment: .leading, spacing: 2) {
-                                                    Text(ch.name)
-                                                        .font(.system(size: 13, weight: .semibold))
-                                                        .foregroundColor(selectedChannel?.url == ch.url ? Color(hex: "007FFF") : .white)
-                                                        .lineLimit(1)
-                                                        .multilineTextAlignment(.leading)
+                                                        .cornerRadius(4)
+                                                    } else {
+                                                        Image(systemName: ch.contentType == "live" ? "antenna.radiowaves.left.and.right" : "film")
+                                                            .foregroundColor(.white.opacity(0.3))
+                                                            .frame(width: 32, height: 32)
+                                                    }
                                                     
-                                                    Text(ch.safeGroup)
-                                                        .font(.system(size: 10))
-                                                        .foregroundColor(.white.opacity(0.4))
-                                                        .lineLimit(1)
-                                                        .multilineTextAlignment(.leading)
+                                                    VStack(alignment: .leading, spacing: 2) {
+                                                        Text(ch.name)
+                                                            .font(.system(size: 13, weight: .semibold))
+                                                            .foregroundColor(selectedChannel?.url == ch.url ? Color(hex: "007FFF") : .white)
+                                                            .lineLimit(1)
+                                                            .multilineTextAlignment(.leading)
+                                                        
+                                                        Text(ch.safeGroup)
+                                                            .font(.system(size: 10))
+                                                            .foregroundColor(.white.opacity(0.4))
+                                                            .lineLimit(1)
+                                                            .multilineTextAlignment(.leading)
+                                                    }
+                                                    Spacer()
                                                 }
-                                                Spacer()
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 8)
+                                                .background(selectedChannel?.url == ch.url ? Color.white.opacity(0.08) : Color.clear)
+                                                .cornerRadius(8)
                                             }
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 8)
-                                            .background(selectedChannel?.url == ch.url ? Color.white.opacity(0.08) : Color.clear)
-                                            .cornerRadius(8)
+                                            .buttonStyle(PlainButtonStyle())
+                                            .id(ch.url)
                                         }
-                                        .buttonStyle(PlainButtonStyle())
+                                    }
+                                    .padding(.horizontal, 16)
+                                }
+                                .onAppear {
+                                    if let selected = selectedChannel {
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                            withAnimation {
+                                                proxy.scrollTo(selected.url, anchor: .center)
+                                            }
+                                        }
                                     }
                                 }
-                                .padding(.horizontal, 16)
+                                .onChange(of: selectedLandscapeGroup) { _ in
+                                    if let selected = selectedChannel {
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                            withAnimation {
+                                                proxy.scrollTo(selected.url, anchor: .center)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                         .frame(width: 300)
@@ -2763,6 +2808,24 @@ struct ContentView: View {
             }
             Spacer()
         }
+    }
+    
+    func initializingView() -> some View {
+        VStack(spacing: 24) {
+            Spacer()
+            
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                .scaleEffect(1.5)
+            
+            Text("İçerikler Hazırlanıyor...")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.white)
+            
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(hex: "08090C").ignoresSafeArea())
     }
     
     func emptyView() -> some View {
@@ -3198,6 +3261,10 @@ struct ContentView: View {
     func loadSavedData() {
         self.errorMessage = nil
         
+        if accounts.isEmpty {
+            isInitializingChannels = false
+        }
+        
         if activeAccountIdString.isEmpty {
             if let first = accounts.first {
                 activeAccountIdString = first.id.uuidString
@@ -3231,6 +3298,8 @@ struct ContentView: View {
                 parseM3UContentSilent(text)
             } else if !m3uUrl.isEmpty {
                 fetchM3uData(m3uUrl)
+            } else {
+                isInitializingChannels = false
             }
             
             if !m3uUrl.isEmpty {
@@ -3253,8 +3322,11 @@ struct ContentView: View {
             if let data = try? Data(contentsOf: getXtreamFilePath()),
                let cached = try? JSONDecoder().decode([Channel].self, from: data) {
                 self.channels = cached
+                isInitializingChannels = false
             } else if !xtreamHost.isEmpty {
                 fetchXtreamData(host: xtreamHost, user: xtreamUser, pass: xtreamPass)
+            } else {
+                isInitializingChannels = false
             }
             
             if !xtreamHost.isEmpty && !xtreamUser.isEmpty && !xtreamPass.isEmpty {
@@ -3366,6 +3438,7 @@ struct ContentView: View {
             
             DispatchQueue.main.async {
                 self.channels = loaded
+                self.isInitializingChannels = false
             }
         }
     }
@@ -3487,7 +3560,7 @@ struct ContentView: View {
     }
     
     // MARK: - Dedicated In-Sheet Setup Handlers
-    func fetchM3uDataInSheet(_ urlString: String) {
+    func fetchM3uDataInSheet(_ urlString: String, epgUrl: String? = nil) {
         let clean = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: clean) else {
             self.sheetError = "Geçersiz M3U Listesi URL adresi!"
@@ -3534,14 +3607,19 @@ struct ContentView: View {
                 self.loadStep1 = true
                 let hostName = URL(string: clean)?.host ?? "M3U Playlist"
                 let newAccountId = UUID()
-                let newAcc = IPTVAccount(id: newAccountId, name: hostName, mode: 0, m3uUrl: clean)
+                let cleanedEpgUrl = epgUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let finalEpgUrl = (cleanedEpgUrl == nil || cleanedEpgUrl!.isEmpty) ? nil : cleanedEpgUrl
+                
+                let newAcc = IPTVAccount(id: newAccountId, name: hostName, mode: 0, m3uUrl: clean, epgUrl: finalEpgUrl)
                 
                 if !self.accounts.contains(where: { $0.m3uUrl == clean }) {
                     self.accounts.append(newAcc)
                     self.saveAccounts()
                     self.activeAccountIdString = newAccountId.uuidString
-                } else if let matched = self.accounts.first(where: { $0.m3uUrl == clean }) {
-                    self.activeAccountIdString = matched.id.uuidString
+                } else if let idx = self.accounts.firstIndex(where: { $0.m3uUrl == clean }) {
+                    self.accounts[idx].epgUrl = finalEpgUrl
+                    self.saveAccounts()
+                    self.activeAccountIdString = self.accounts[idx].id.uuidString
                 }
                 
                 // Save to partitioned cache file safely
@@ -3929,6 +4007,7 @@ struct ContentView: View {
             }.resume()
             
             streamGroup.notify(queue: .main) {
+                self.isInitializingChannels = false
                 if !fetchedChannels.isEmpty {
                     self.channels = fetchedChannels
                     // Sync silent local cache as well
@@ -4260,6 +4339,20 @@ struct ContentView: View {
                         Text("İçerisinde film, canlı tv barındıran tam M3U playlist linkinizi girin.")
                             .font(.system(size: 11))
                             .foregroundColor(.white.opacity(0.4))
+                            
+                        Spacer().frame(height: 8)
+                        
+                        Text("EPG M3U/XMLTV URL (İsteğe bağlı)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(Color(hex: "007FFF"))
+                        
+                        TextField("http://sunucu.com/epg.xml", text: $tempM3uEpgUrl)
+                            .padding()
+                            .background(Color.white.opacity(0.06))
+                            .cornerRadius(12)
+                            .foregroundColor(.white)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
@@ -4277,7 +4370,7 @@ struct ContentView: View {
                         if tempM3uUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             sheetError = "Lütfen geçerli bir M3U playlist URL adresi girin."
                         } else {
-                            fetchM3uDataInSheet(tempM3uUrl)
+                            fetchM3uDataInSheet(tempM3uUrl, epgUrl: tempM3uEpgUrl)
                         }
                     }) {
                         Text(sheetIsLoading ? "Bağlanıyor..." : "PLAYLIST'İ YÜKLE")
@@ -4444,82 +4537,84 @@ struct ContentView: View {
                 VStack(spacing: 20) {
                     if let acc = selectedDetailAccount {
                         VStack(alignment: .leading, spacing: 10) {
-                        Text("Sunucu bilgisi")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.white.opacity(0.6))
+                            Text("Sunucu bilgisi")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white.opacity(0.6))
+                                .padding(.horizontal, 20)
+                            
+                            VStack(spacing: 0) {
+                                HStack {
+                                    Image(systemName: "wifi")
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .frame(width: 24)
+                                    Text("Durum:")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .padding(.leading, 4)
+                                    Text((acc.status ?? serverStatus).isEmpty ? "AKTİF" : (acc.status ?? serverStatus).uppercased())
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor((acc.status ?? serverStatus).lowercased() == "expired" ? .red : .white)
+                                        .padding(.leading, 4)
+                                    Spacer()
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                                
+                                if acc.mode == 1 {
+                                    Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
+                                    
+                                    HStack {
+                                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                                            .foregroundColor(.white.opacity(0.7))
+                                            .frame(width: 24)
+                                        Text("Bağlantılar:")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(.white.opacity(0.7))
+                                            .padding(.leading, 4)
+                                        Text("\((acc.activeConnections ?? serverActiveCons).isEmpty ? "0" : (acc.activeConnections ?? serverActiveCons))/\((acc.maxConnections ?? serverMaxCons).isEmpty ? "1" : (acc.maxConnections ?? serverMaxCons))")
+                                            .font(.system(size: 16, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .padding(.leading, 4)
+                                        Spacer()
+                                    }
+                                    .padding(.vertical, 12)
+                                    .padding(.horizontal, 16)
+                                    
+                                    Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
+                                    
+                                    HStack {
+                                        Image(systemName: "calendar")
+                                            .foregroundColor(.white.opacity(0.7))
+                                            .frame(width: 24)
+                                        Text("Sona eriyor:")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(.white.opacity(0.7))
+                                            .padding(.leading, 4)
+                                        Text((acc.expDate ?? serverExpiry).isEmpty ? "Bilinmiyor" : (acc.expDate ?? serverExpiry))
+                                            .font(.system(size: 16, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .padding(.leading, 4)
+                                        Spacer()
+                                    }
+                                    .padding(.vertical, 12)
+                                    .padding(.horizontal, 16)
+                                }
+                            }
+                            .sexyGlass(cornerRadius: 16)
                             .padding(.horizontal, 20)
-                        
-                        VStack(spacing: 0) {
-                            HStack {
-                                Image(systemName: "wifi")
-                                    .foregroundColor(.white.opacity(0.7))
-                                    .frame(width: 24)
-                                Text("Durum:")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.white.opacity(0.7))
-                                    .padding(.leading, 4)
-                                Text(serverStatus.isEmpty ? "ACTIVE" : serverStatus.uppercased())
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(serverStatus.lowercased() == "expired" ? .red : .white)
-                                    .padding(.leading, 4)
-                                Spacer()
-                            }
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
-                            
-                            Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
-                            
-                            HStack {
-                                Image(systemName: "point.3.connected.trianglepath.dotted")
-                                    .foregroundColor(.white.opacity(0.7))
-                                    .frame(width: 24)
-                                Text("Bağlantılar:")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.white.opacity(0.7))
-                                    .padding(.leading, 4)
-                                Text(serverMaxCons.isEmpty ? "0/2" : serverMaxCons)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.leading, 4)
-                                Spacer()
-                            }
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
-                            
-                            Divider().background(Color.white.opacity(0.1)).padding(.leading, 48)
-                            
-                            HStack {
-                                Image(systemName: "calendar")
-                                    .foregroundColor(.white.opacity(0.7))
-                                    .frame(width: 24)
-                                Text("Sona eriyor:")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.white.opacity(0.7))
-                                    .padding(.leading, 4)
-                                Text(serverExpiry.isEmpty ? "27 Şub 2027" : serverExpiry)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.leading, 4)
-                                Spacer()
-                            }
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
                         }
-                        .sexyGlass(cornerRadius: 16)
-                        .padding(.horizontal, 20)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Ayarlar")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.white.opacity(0.6))
-                            .padding(.horizontal, 20)
                         
-                        VStack(spacing: 0) {
-                            Button(action: {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Ayarlar")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white.opacity(0.6))
+                                .padding(.horizontal, 20)
+                            
+                            VStack(spacing: 0) {
+                                Button(action: {
                                 // Reload
                                 if acc.mode == 0 {
-                                    fetchM3uDataInSheet(acc.m3uUrl)
+                                    fetchM3uDataInSheet(acc.m3uUrl, epgUrl: acc.epgUrl)
                                 } else {
                                     fetchXtreamDataInSheet(host: acc.xtreamHost, user: acc.xtreamUser, pass: acc.xtreamPass)
                                 }
@@ -4544,10 +4639,12 @@ struct ContentView: View {
                                 tempEditAccountName = acc.name
                                 if acc.mode == 0 {
                                     tempEditUrl = acc.m3uUrl
+                                    tempEditEpgUrl = acc.epgUrl ?? ""
                                     tempEditUser = ""
                                     tempEditPass = ""
                                 } else {
                                     tempEditUrl = acc.xtreamHost
+                                    tempEditEpgUrl = acc.epgUrl ?? ""
                                     tempEditUser = acc.xtreamUser
                                     tempEditPass = acc.xtreamPass
                                 }
@@ -4603,6 +4700,9 @@ struct ContentView: View {
                                     await MainActor.run {
                                         sheetIsLoading = false
                                         cacheClearedMessage = "EPG başarıyla güncellendi."
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                            cacheClearedMessage = nil
+                                        }
                                     }
                                 }
                             }) {
@@ -4720,6 +4820,20 @@ struct ContentView: View {
                                     .autocorrectionDisabled()
                                     .textInputAutocapitalization(.never)
                             }
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("EPG M3U/XMLTV URL (İsteğe bağlı)")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.6))
+                                
+                                TextField("http://.../epg.xml", text: $tempEditEpgUrl)
+                                    .padding(16)
+                                    .background(Color.white.opacity(0.06))
+                                    .cornerRadius(12)
+                                    .foregroundColor(.white)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+                            }
                         } else {
                             // Xtream fields
                             VStack(alignment: .leading, spacing: 8) {
@@ -4798,6 +4912,8 @@ struct ContentView: View {
                             let newName = tempEditAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (oldMode == 0 ? "M3U Playlist" : "Xtream Server") : tempEditAccountName
                             
                             accounts[idx].name = newName
+                            accounts[idx].epgUrl = tempEditEpgUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+                            
                             if oldMode == 0 {
                                 accounts[idx].m3uUrl = tempEditUrl.trimmingCharacters(in: .whitespacesAndNewlines)
                             } else {
@@ -4816,6 +4932,9 @@ struct ContentView: View {
                             selectedDetailAccount = accounts[idx]
                             providerSheetState = 3 // back to detail
                             cacheClearedMessage = "Sunucu bilgileri başarıyla güncellendi."
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                cacheClearedMessage = nil
+                            }
                         }
                     }) {
                         Text("BİLGİLERİ KAYDET")
@@ -5249,12 +5368,31 @@ class UniqueChannelsCache {
     static let lock = NSRecursiveLock()
     static var cache: [String: [Channel]] = [:]
     static var cleanedTitles: [String: String] = [:]
+    static var cacheGroups: [String: [String]] = [:]
     
     static func clear() {
         lock.lock()
         cache.removeAll()
         cleanedTitles.removeAll()
+        cacheGroups.removeAll()
         lock.unlock()
+    }
+    
+    static func getGroups(for type: String, channels: [Channel]) -> [String] {
+        let cacheKey = "groups_\(type)_\(channels.count)"
+        lock.lock()
+        if let cached = cacheGroups[cacheKey] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+        
+        let groups = Array(Set(channels.filter({ $0.contentType == type }).map({ $0.safeGroup }))).sorted()
+        
+        lock.lock()
+        cacheGroups[cacheKey] = groups
+        lock.unlock()
+        return groups
     }
 }
 
