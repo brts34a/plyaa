@@ -3,6 +3,7 @@ import AVKit
 import Combine
 import AVFoundation
 import MediaPlayer
+import KSPlayer
 
 // MARK: - Safe Decoder Int/String Helper for Xtream Codes Compatibility
 enum SafeStringOrInt: Codable, Hashable {
@@ -178,52 +179,39 @@ extension MPVolumeView {
         return volumeView.subviews.first(where: { $0 is UISlider }) as? UISlider
     }
 }
-
-class PlayerInfoManager: NSObject, ObservableObject {
+class PlayerInfoManager: ObservableObject {
     @Published var resolutionString: String = "Bağlanıyor..."
     @Published var isAudioOnly: Bool = false
     @Published var isOverlayVisible: Bool = true
     @Published var isPlaying: Bool = true
-    weak var player: AVPlayer?
+    weak var player: IOSVideoPlayerView?
     var timer: Timer?
     var hideTimer: Timer?
-    private var isObserving = false
     
-    func start(player: AVPlayer?) {
-        if isObserving, let oldPlayer = self.player {
-            oldPlayer.removeObserver(self, forKeyPath: "rate")
-            isObserving = false
-        }
+    func start(player: IOSVideoPlayerView?) {
         self.player = player
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
             self?.update()
         }
-        
-        if let p = self.player {
-            p.addObserver(self, forKeyPath: "rate", options: [.new, .initial], context: nil)
-            isObserving = true
-        }
-        
-        userTapped() // initial show
+        userTapped()
     }
     
-    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
-        if keyPath == "rate" {
-            if let player = self.player {
-                DispatchQueue.main.async {
-                    let newIsPlaying = player.rate != 0
-                    if self.isPlaying != newIsPlaying {
-                        self.isPlaying = newIsPlaying
-                    }
-                }
+    func update() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let pLayer = self.player?.playerLayer else { return }
+            self.isPlaying = pLayer.player.state == .playing
+            
+            let size = pLayer.player.naturalSize
+            if size.height > 10 {
+                self.resolutionString = "\(Int(size.height))p 50FPS"
             }
         }
     }
     
     func togglePlayPause() {
         guard let p = player else { return }
-        if p.rate != 0 {
+        if p.playerLayer?.player.state == .playing {
             p.pause()
         } else {
             p.play()
@@ -247,10 +235,6 @@ class PlayerInfoManager: NSObject, ObservableObject {
     func stop() {
         timer?.invalidate()
         hideTimer?.invalidate()
-        if isObserving, let p = player {
-            p.removeObserver(self, forKeyPath: "rate")
-            isObserving = false
-        }
         player?.pause()
         player = nil
         DispatchQueue.main.async {
@@ -263,87 +247,31 @@ class PlayerInfoManager: NSObject, ObservableObject {
         timer?.invalidate()
         hideTimer?.invalidate()
     }
-    
-    func update() {
-        guard let item = player?.currentItem else { return }
-        
-        // Update Resolution & FPS
-        let size = item.presentationSize
-        var fpsInfo = ""
-        var foundVideo = false
-        
-        for trackItem in item.tracks {
-            if let assetTrack = trackItem.assetTrack, assetTrack.mediaType == .video {
-                foundVideo = true
-                let rawFps = trackItem.currentVideoFrameRate > 0 ? trackItem.currentVideoFrameRate : assetTrack.nominalFrameRate
-                
-                var finalFps = 50 // High-quality smooth broadcast TV default
-                if rawFps > 5 {
-                    let rounded = Int(round(rawFps))
-                    if rounded >= 55 { finalFps = 60 }
-                    else if rounded >= 42 { finalFps = 50 }
-                    else if rounded >= 28 { finalFps = 30 }
-                    else { finalFps = 25 }
-                } else {
-                    // Professional resolution-aware fallback
-                    if size.height >= 1080 {
-                        finalFps = 50
-                    } else if size.height >= 720 {
-                        finalFps = 50
-                    } else {
-                        finalFps = 25
-                    }
-                }
-                fpsInfo = " \(finalFps)FPS"
-                break
-            }
-        }
-        
-        DispatchQueue.main.async {
-            let newResString: String
-            let newAudioOnly = false
-            
-            if size.height > 10 {
-                newResString = "\(Int(size.height))p\(fpsInfo)"
-                self.timer?.invalidate() // TSAVE: Keep the stable state locked once resolution is locked
-            } else if foundVideo {
-                newResString = "Bağlanıyor..."
-            } else {
-                newResString = "Oynatılıyor"
-            }
-            
-            if self.resolutionString != newResString {
-                self.resolutionString = newResString
-            }
-            if self.isAudioOnly != newAudioOnly {
-                self.isAudioOnly = newAudioOnly
-            }
-        }
-    }
 }
 
-// MARK: - Native iOS High-Performance IPTV AVPlayer
-struct NativeVideoPlayerView: UIViewControllerRepresentable {
+struct TestKSPlayer: UIViewRepresentable {
+    func makeUIView(context: Context) -> IOSVideoPlayerView {
+        let view = IOSVideoPlayerView()
+        return view
+    }
+    func updateUIView(_ uiView: IOSVideoPlayerView, context: Context) {}
+}
+
+// MARK: - Native iOS High-Performance IPTV AVPlayer (Switched to KSPlayer)
+struct NativeVideoPlayerView: UIViewRepresentable {
     let urlString: String
     let videoContentMode: UIView.ContentMode
     @ObservedObject var infoManager: PlayerInfoManager
     var showsPlaybackControls: Bool = true
     
-    class Coordinator: NSObject, UIGestureRecognizerDelegate {
+    class Coordinator: NSObject {
         var currentUrl: String = ""
-        var player: AVPlayer?
-        var infoManager: PlayerInfoManager
+        var playerView: IOSVideoPlayerView?
+        weak var infoManager: PlayerInfoManager?
         
         init(infoManager: PlayerInfoManager) {
             self.infoManager = infoManager
-        }
-        
-        @objc func handleTap() {
-            infoManager.userTapped()
-        }
-        
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            return true
+            super.init()
         }
     }
     
@@ -351,125 +279,56 @@ struct NativeVideoPlayerView: UIViewControllerRepresentable {
         Coordinator(infoManager: infoManager)
     }
     
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let controller = AVPlayerViewController()
-        controller.showsPlaybackControls = showsPlaybackControls
-        controller.videoGravity = videoContentMode == .scaleAspectFill ? .resizeAspectFill : .resizeAspect
-        controller.allowsPictureInPicturePlayback = true
-        controller.view.backgroundColor = .black
+    func makeUIView(context: Context) -> IOSVideoPlayerView {
+        // Enforce FFmpeg backend for IPTV robust support to fix video/audio sync, "stuttering", and "audio-only" streams
+        KSOptions.firstPlayerType = KSMEPlayer.self
+        KSOptions.secondPlayerType = KSMEPlayer.self // Fallback
         
-        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap))
-        tap.delegate = context.coordinator
-        tap.cancelsTouchesInView = false
-        controller.view.addGestureRecognizer(tap)
+        let playerView = IOSVideoPlayerView()
+        playerView.backgroundColor = .black
         
-        let overlayView = PlayerOverlaySwiftUIView(info: infoManager)
-        let hostingController = UIHostingController(rootView: overlayView)
-        hostingController.view.backgroundColor = .clear
-        hostingController.view.isUserInteractionEnabled = false // Allow touches to pass through to native controls
+        // Hide default KSPlayer UI if we want to show our own
+        playerView.isControlsHidden = !showsPlaybackControls
         
-        if let overlay = controller.contentOverlayView {
-            hostingController.view.frame = overlay.bounds
-            hostingController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            overlay.addSubview(hostingController.view)
-        }
-        
-        return controller
+        context.coordinator.playerView = playerView
+        return playerView
     }
     
-    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
-        uiViewController.showsPlaybackControls = showsPlaybackControls
-        uiViewController.videoGravity = videoContentMode == .scaleAspectFill ? .resizeAspectFill : .resizeAspect
-        
+    func updateUIView(_ uiView: IOSVideoPlayerView, context: Context) {
         let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
-            uiViewController.player?.pause()
-            uiViewController.player = nil
+            uiView.pause()
             return
         }
         
         if context.coordinator.currentUrl != normalized {
             context.coordinator.currentUrl = normalized
             
-            // Explicitly pause and clean up previous player
-            uiViewController.player?.pause()
-            uiViewController.player?.replaceCurrentItem(with: nil)
-            uiViewController.player = nil
-            
-            // Magic Trick for IPTV Optimization: Smartly convert any Xtream Codes TS/Live link to HLS (.m3u8) for native AVPlayer
-            var optimizedUrlString = normalized
-            if let urlObj = URL(string: normalized) {
-                let pathParts = urlObj.path.split(separator: "/").map(String.init).filter { !$0.isEmpty }
+            // Revert the magic trick (.m3u8 conversion) since KSPlayer/FFmpeg processes everything natively perfectly,
+            // including TS and MKV directly!!
+            if let targetUrl = URL(string: normalized) {
+                let options = KSOptions()
+                options.isAutoPlay = true
+                options.preferredForwardBufferDuration = 1.5 // Keeps memory low, starts fast
+                options.userAgent = "VLC/3.0.18 LibVLC/3.0.18"
                 
-                var isLiveXtream = false
-                var user = ""
-                var pass = ""
-                var id = ""
-                
-                if pathParts.count == 3 {
-                    user = pathParts[0]
-                    pass = pathParts[1]
-                    id = pathParts[2]
-                    isLiveXtream = true
-                } else if pathParts.count == 4 && pathParts[0].lowercased() == "live" {
-                    user = pathParts[1]
-                    pass = pathParts[2]
-                    id = pathParts[3]
-                    isLiveXtream = true
-                }
-                
-                if isLiveXtream {
-                    let idLower = id.lowercased()
-                    // Don't modify if it's already an explicit VOD extension
-                    if !idLower.hasSuffix(".mp4") && !idLower.hasSuffix(".mkv") && !idLower.hasSuffix(".avi") && !idLower.hasSuffix(".m3u8") {
-                        if let dotIndex = id.lastIndex(of: ".") {
-                            id = String(id[..<dotIndex])
-                        }
-                        
-                        if var components = URLComponents(string: normalized) {
-                            components.path = "/live/\(user)/\(pass)/\(id).m3u8"
-                            if let newUrl = components.url?.absoluteString {
-                                optimizedUrlString = newUrl
-                            }
-                        }
-                    }
-                } else {
-                    if optimizedUrlString.lowercased().hasSuffix(".ts") {
-                        optimizedUrlString = String(optimizedUrlString.dropLast(3)) + ".m3u8"
-                    }
-                }
-            }
-            
-            if let url = URL(string: optimizedUrlString) {
                 try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
                 try? AVAudioSession.sharedInstance().setActive(true)
                 
-                // TRICK 2: Spoof User-Agent to bypass IPTV server blocks!
-                let headers: [String: String] = [
-                    "User-Agent": "VLC/3.0.18 LibVLC/3.0.18",
-                    "Accept": "*/*"
-                ]
-                let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-                let playerItem = AVPlayerItem(asset: asset)
+                uiView.set(url: targetUrl, options: options)
+                uiView.play()
                 
-                // 1.5 saniye önbellek ile donmaları sıfıra indirirken neredeyse anında açılmasını sağlama
-                playerItem.preferredForwardBufferDuration = 1.5
-                
-                let player = AVPlayer(playerItem: playerItem)
-                player.automaticallyWaitsToMinimizeStalling = true
-                
-                uiViewController.player = player
-                context.coordinator.player = player
-                player.play()
-                
-                infoManager.start(player: player)
+                // Keep the UI overlay synchronized
+                DispatchQueue.main.async {
+                    context.coordinator.infoManager?.resolutionString = "Oynatılıyor"
+                    context.coordinator.infoManager?.isPlaying = true
+                }
             }
         }
     }
     
-    static func dismantleUIViewController(_ uiViewController: AVPlayerViewController, coordinator: Coordinator) {
-        uiViewController.player?.pause()
-        uiViewController.player = nil
+    static func dismantleUIView(_ uiView: IOSVideoPlayerView, coordinator: Coordinator) {
+        uiView.pause()
     }
 }
 
@@ -4351,18 +4210,6 @@ struct ContentView: View {
                             .foregroundColor(.white.opacity(0.4))
                             
                         Spacer().frame(height: 8)
-                        
-                        Text("EPG M3U/XMLTV URL (İsteğe bağlı)")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(Color(hex: "007FFF"))
-                        
-                        TextField("http://sunucu.com/epg.xml", text: $tempM3uEpgUrl)
-                            .padding()
-                            .background(Color.white.opacity(0.06))
-                            .cornerRadius(12)
-                            .foregroundColor(.white)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
@@ -4830,20 +4677,6 @@ struct ContentView: View {
                                     .autocorrectionDisabled()
                                     .textInputAutocapitalization(.never)
                             }
-                            
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("EPG M3U/XMLTV URL (İsteğe bağlı)")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.6))
-                                
-                                TextField("http://.../epg.xml", text: $tempEditEpgUrl)
-                                    .padding(16)
-                                    .background(Color.white.opacity(0.06))
-                                    .cornerRadius(12)
-                                    .foregroundColor(.white)
-                                    .autocorrectionDisabled()
-                                    .textInputAutocapitalization(.never)
-                            }
                         } else {
                             // Xtream fields
                             VStack(alignment: .leading, spacing: 8) {
@@ -5172,79 +5005,45 @@ struct ChannelRowView: View {
                         .font(.system(size: 11, weight: .semibold))
                         .lineLimit(1)
                 }
-                Spacer()
+                Spacer(minLength: 4)
+                
+                if channel.contentType == "live" {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(epgManager.currentProgramName(for: channel))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(isSelected ? Color(hex: "6D28D9") : .white.opacity(0.8))
+                            .lineLimit(1)
+                            .frame(maxWidth: 120, alignment: .trailing)
+                            
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.1))
+                                    .frame(height: 2)
+                                    .cornerRadius(1)
+                                
+                                Rectangle()
+                                    .fill(isSelected ? Color(hex: "6D28D9") : Color(hex: "007FFF"))
+                                    .frame(width: geo.size.width * CGFloat(epgManager.programProgress(for: channel)), height: 2)
+                                    .cornerRadius(1)
+                            }
+                        }
+                        .frame(width: 80, height: 2)
+                    }
+                }
                 
                 // Right badges
                 HStack(spacing: 6) {
-                    Text("FHD")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(Color.white.opacity(0.7))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.white.opacity(0.1))
-                        .cornerRadius(4)
-                    
                     Button(action: onTapFavorite) {
                         Image(systemName: isFavorite ? "heart.fill" : "heart")
                             .foregroundColor(isFavorite ? Color(hex: "FF3B30") : Color.white.opacity(0.4))
                             .font(.system(size: 16))
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .frame(width: 34, height: 34)
+                    .frame(width: 32, height: 32)
                 }
             }
             .padding(12)
-            
-            // Sub-EPG timeline mock if it's Live TV
-            if channel.contentType == "live" {
-                VStack(spacing: 8) {
-                    // Timeline bar representing elapsed time
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Rectangle()
-                                .fill(Color.white.opacity(0.1))
-                                .frame(height: 2)
-                                .cornerRadius(1)
-                            
-                            Rectangle()
-                                .fill(isSelected ? Color(hex: "6D28D9") : Color.white.opacity(0.3))
-                                .frame(width: geo.size.width * CGFloat(epgManager.programProgress(for: channel)), height: 2)
-                                .cornerRadius(1)
-                        }
-                    }
-                    .frame(height: 2)
-                    .padding(.horizontal, 12)
-                    
-                    // Shows
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("ŞUAN OYNUYOR")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundColor(Color.white.opacity(0.4))
-                            Text(epgManager.currentProgramName(for: channel))
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                        }
-                        
-                        Spacer()
-                        
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("SIRADAKİ PROGRAM")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundColor(Color.white.opacity(0.4))
-                            Text(epgManager.nextProgramName(for: channel))
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(.white)
-                                .opacity(0.8)
-                                .lineLimit(1)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
-                }
-                .background(Color(hex: "121420").opacity(0.3))
-            }
         }
         .background(isSelected ? Color(hex: "1E2132") : Color(hex: "171926"))
         .cornerRadius(14)
