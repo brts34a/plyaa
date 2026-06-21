@@ -291,6 +291,22 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         
         let playerView = IOSVideoPlayerView()
         playerView.backgroundColor = .black
+        playerView.isUserInteractionEnabled = false // Disable KSPlayer's own touch handling, so our UI catches touches
+        
+        // Ensure KSPlayer doesn't display its default controls by hiding its control overlay robustly
+        let hideControls = {
+            for subview in playerView.subviews {
+                let name = String(describing: type(of: subview))
+                if name.contains("Control") || name.contains("Mask") {
+                    subview.isHidden = true
+                    subview.alpha = 0
+                }
+            }
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: hideControls)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: hideControls)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: hideControls)
         
         context.coordinator.playerView = playerView
         return playerView
@@ -945,81 +961,25 @@ struct ContentView: View {
             .padding(.top, 20)
             .padding(.bottom, 16)
             
-            // Header times
-            HStack {
-                Text("Bugün")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.white)
-                Spacer()
-                Text("Şimdi")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.white.opacity(0.5))
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
+            // Channel List
+            let filteredLive = channels.filter { $0.contentType == "live" && $0.safeGroup == category && (liveSearchQuery.isEmpty || $0.name.localizedCaseInsensitiveContains(liveSearchQuery)) }
             
-            // Timeline
-            epgTimelineGrid(category: category)
-        }
-    }
-    
-    func epgTimelineGrid(category: String) -> some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(spacing: 12) {
-                let filteredLive = channels.filter { $0.contentType == "live" && $0.safeGroup == category && (liveSearchQuery.isEmpty || $0.name.localizedCaseInsensitiveContains(liveSearchQuery)) }
-                ForEach(filteredLive, id: \.id) { channel in
-                    HStack(spacing: 12) {
-                        // Left Logo
-                        Button(action: { selectedChannel = channel }) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color.black.opacity(0.2))
-                                    .frame(width: 60, height: 60)
-                                
-                                if let url = URL(string: channel.logo) {
-                                    AsyncImage(url: url) { phase in
-                                        if let image = phase.image {
-                                            image.resizable().aspectRatio(contentMode: .fit).frame(width: 40, height: 40).cornerRadius(6)
-                                        } else {
-                                            Image(systemName: "tv.fill").foregroundColor(.white.opacity(0.5))
-                                        }
-                                    }
-                                } else {
-                                     Image(systemName: "tv.fill").foregroundColor(.white.opacity(0.5))
-                                }
-                            }
-                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selectedChannel == channel ? Color.white : Color.clear, lineWidth: 2))
-                        }
-                        .padding(.leading, 16)
-                        
-                        // Horizontal EPG Row
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                epgProgramBox(title: EPGManager.shared.currentProgramName(for: channel), time: "Şimdi: \(channel.name)", width: 220, active: selectedChannel == channel, onPress: { selectedChannel = channel })
-                                epgProgramBox(title: EPGManager.shared.nextProgramName(for: channel), time: "Sıradaki", width: 140, active: false, onPress: {})
-                            }
-                            .padding(.trailing, 16)
-                        }
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(spacing: 8) {
+                    ForEach(filteredLive, id: \.id) { channel in
+                        ChannelRowView(
+                            channel: channel,
+                            isSelected: selectedChannel?.url == channel.url,
+                            isFavorite: favourites.contains(channel.url),
+                            onTapFavorite: { toggleFavourite(channel.url) },
+                            onTapChannel: { selectedChannel = channel }
+                        )
+                        .padding(.horizontal, 20)
                     }
                 }
+                .padding(.bottom, 140) // Make room for tabs and player
             }
-            .padding(.top, 10)
-            .padding(.bottom, 140) // Make room for tabs and player
         }
-    }
-
-    func epgProgramBox(title: String, time: String, width: CGFloat, active: Bool, onPress: @escaping () -> Void) -> some View {
-        Button(action: onPress) {
-            VStack(alignment: .leading, spacing: 4) {
-                 Text(title).font(.system(size: 13, weight: .bold)).foregroundColor(active ? .black : .white).lineLimit(1)
-                 Text(time).font(.system(size: 10, weight: .semibold)).foregroundColor(active ? .black.opacity(0.7) : .white.opacity(0.6)).lineLimit(1)
-            }
-            .padding(10)
-            .frame(minWidth: width, idealHeight: 60, maxHeight: 60, alignment: .leading)
-            .background(active ? Color.white : Color.white.opacity(0.08))
-            .cornerRadius(12)
-        }
-        .buttonStyle(PlainButtonStyle())
     }
     
         @State private var activeLibraryCategory: String? = nil
@@ -3247,7 +3207,7 @@ struct ContentView: View {
             
             var foundEpgUrl: String? = nil
             if let firstLine = lines.first(where: { $0.hasPrefix("#EXTM3U") }) {
-                if let range = firstLine.range(of: "x-tvg-url=\"") {
+                if let range = firstLine.range(of: "x-tvg-url=\"") ?? firstLine.range(of: "url-tvg=\"") {
                     let sub = firstLine[range.upperBound...]
                     if let end = sub.range(of: "\"") {
                         foundEpgUrl = String(sub[..<end.lowerBound])
@@ -3349,6 +3309,26 @@ struct ContentView: View {
             var currentLogo = ""
             
             DispatchQueue.main.async { self.loadStep2 = true; self.loadingMessage = "Kanallar ayrıştırılıyor..." }
+            
+            var foundEpgUrl: String? = nil
+            if let firstLine = lines.first(where: { $0.hasPrefix("#EXTM3U") }) {
+                if let range = firstLine.range(of: "x-tvg-url=\"") ?? firstLine.range(of: "url-tvg=\"") {
+                    let sub = firstLine[range.upperBound...]
+                    if let end = sub.range(of: "\"") {
+                        foundEpgUrl = String(sub[..<end.lowerBound])
+                    }
+                }
+            }
+            if let found = foundEpgUrl {
+                DispatchQueue.main.async {
+                    if let idx = self.accounts.firstIndex(where: { $0.m3uUrl == self.m3uUrl }) {
+                        if self.accounts[idx].epgUrl != found {
+                            self.accounts[idx].epgUrl = found
+                            self.saveAccounts()
+                        }
+                    }
+                }
+            }
             
             for line in lines {
                 let clean = line.trimmingCharacters(in: .whitespacesAndNewlines)
