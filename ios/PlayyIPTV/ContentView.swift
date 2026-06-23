@@ -303,7 +303,7 @@ class PlayerInfoManager: ObservableObject {
     }
 }
 
-// MARK: - Native iOS High-Performance IPTV AVPlayer Container
+// MARK: - Native iOS High-Performance IPTV AVPlayer Layer Container
 class AVPlayerContainerView: UIView {
     private var playerLayer: AVPlayerLayer?
     var player: AVPlayer? {
@@ -339,6 +339,41 @@ class AVPlayerContainerView: UIView {
     func setVideoGravity(_ gravity: AVLayerVideoGravity) {
         playerLayer?.videoGravity = gravity
     }
+}
+
+func getModdedURL(from urlString: String, isLive: Bool) -> URL {
+    let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let originalURL = URL(string: normalized) else {
+        return URL(string: "about:blank")!
+    }
+    
+    let path = originalURL.path.lowercased()
+    if path.hasSuffix(".ts") || urlString.contains(".ts?") || urlString.contains("/mpegts") || urlString.contains("type=mpts") || urlString.contains("/ts/") {
+        let tempDir = FileManager.default.temporaryDirectory
+        let hash = abs(normalized.hashValue)
+        let filename = "stream_\(hash).m3u8"
+        let fileURL = tempDir.appendingPathComponent(filename)
+        
+        let targetDuration = isLive ? 86400 : 3600
+        let playlistContent = """
+        #EXTM3U
+        #EXT-X-VERSION:3
+        #EXT-X-TARGETDURATION:\(targetDuration)
+        #EXT-X-MEDIA-SEQUENCE:0
+        #EXTINF:\(targetDuration).0,
+        \(normalized)
+        \(isLive ? "" : "#EXT-X-ENDLIST")
+        """
+        
+        do {
+            try playlistContent.write(to: fileURL, atomically: true, encoding: .utf8)
+            return fileURL
+        } catch {
+            print("Failed to write modded m3u8: \(error)")
+        }
+    }
+    
+    return originalURL
 }
 
 struct NativeVideoPlayerView: UIViewRepresentable {
@@ -437,7 +472,15 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 }
             }
             
+            NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidReachEnd), name: .AVPlayerItemDidPlayToEndTime, object: item)
+            
             newPlayer.play()
+        }
+        
+        @objc func playerItemDidReachEnd(notification: Notification) {
+            DispatchQueue.main.async { [weak self] in
+                self?.infoManager?.isPlaying = false
+            }
         }
         
         func cleanUp() {
@@ -451,6 +494,8 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             likelyToKeepUpObserver = nil
             emptyBufferObserver?.invalidate()
             emptyBufferObserver = nil
+            
+            NotificationCenter.default.removeObserver(self)
             
             player?.pause()
             player = nil
@@ -503,41 +548,6 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         coordinator.cleanUp()
         uiView.player = nil
     }
-}
-
-func getModdedURL(from urlString: String, isLive: Bool) -> URL {
-    let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let originalURL = URL(string: normalized) else {
-        return URL(string: "about:blank")!
-    }
-    
-    let path = originalURL.path.lowercased()
-    if path.hasSuffix(".ts") || urlString.contains(".ts?") || urlString.contains("/mpegts") || urlString.contains("type=mpts") {
-        let tempDir = FileManager.default.temporaryDirectory
-        let hash = abs(normalized.hashValue)
-        let filename = "stream_\(hash).m3u8"
-        let fileURL = tempDir.appendingPathComponent(filename)
-        
-        let targetDuration = isLive ? 86400 : 3600
-        let playlistContent = """
-        #EXTM3U
-        #EXT-X-VERSION:3
-        #EXT-X-TARGETDURATION:\(targetDuration)
-        #EXT-X-MEDIA-SEQUENCE:0
-        #EXTINF:\(targetDuration).0,
-        \(normalized)
-        \(isLive ? "" : "#EXT-X-ENDLIST")
-        """
-        
-        do {
-            try playlistContent.write(to: fileURL, atomically: true, encoding: .utf8)
-            return fileURL
-        } catch {
-            print("Failed to write modded m3u8: \(error)")
-        }
-    }
-    
-    return originalURL
 }
 
 // MARK: - Modern Player Overlay: Clock, Quality
