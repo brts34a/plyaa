@@ -441,6 +441,8 @@ struct NativeVideoPlayerView: UIViewRepresentable {
     
     static func dismantleUIView(_ uiView: PlayerContainerView, coordinator: Coordinator) {
         uiView.ksPlayerView?.pause()
+        uiView.ksPlayerView?.resetPlayer()
+        uiView.ksPlayerView?.removeFromSuperview()
     }
 }
 
