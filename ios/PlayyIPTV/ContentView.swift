@@ -212,11 +212,11 @@ class PlayerInfoManager: ObservableObject {
     @Published var isScrubbing: Bool = false
     @Published var scrubbingTime: Double? = nil
     
-    weak var ksPlayer: IOSVideoPlayerView?
+    weak var ksPlayer: VideoPlayerView?
     var timer: Timer?
     var hideTimer: Timer?
     
-    func start(player ksPlayer: IOSVideoPlayerView? = nil) {
+    func start(player ksPlayer: VideoPlayerView? = nil) {
         self.ksPlayer = ksPlayer
         timer?.invalidate()
         userTapped()
@@ -304,7 +304,7 @@ class PlayerInfoManager: ObservableObject {
 
 // MARK: - Native iOS High-Performance IPTV KSPlayer
 class PlayerContainerView: UIView {
-    var ksPlayerView: IOSVideoPlayerView?
+    var ksPlayerView: VideoPlayerView?
     private var isLive: Bool = false
     
     init(frame: CGRect, isLive: Bool) {
@@ -319,7 +319,7 @@ class PlayerContainerView: UIView {
     }
     
     private func setupSubviews() {
-        let ks = IOSVideoPlayerView()
+        let ks = VideoPlayerView()
         ks.translatesAutoresizingMaskIntoConstraints = false
         self.addSubview(ks)
         NSLayoutConstraint.activate([
