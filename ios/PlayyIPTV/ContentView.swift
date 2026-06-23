@@ -2105,7 +2105,7 @@ struct ContentView: View {
 
     var landscapePlayerView: some View {
         ZStack {
-            if let _ = selectedChannel {
+            if let channel = selectedChannel {
                 // 2 & 3. Base Tap-to-toggle overlay & Swipe Gestures (Brightness/Volume)
                 GeometryReader { geo in
                     Color.black.opacity(0.005)
