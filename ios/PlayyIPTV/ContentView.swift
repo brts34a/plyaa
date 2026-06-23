@@ -4,6 +4,7 @@ import Combine
 import AVFoundation
 import MediaPlayer
 import zlib
+import Network
 
 // MARK: - Safe Decoder Int/String Helper for Xtream Codes Compatibility
 enum SafeStringOrInt: Codable, Hashable {
@@ -210,18 +211,101 @@ class PlayerInfoManager: ObservableObject {
     @Published var duration: Double = 1.0
     @Published var isScrubbing: Bool = false
     @Published var scrubbingTime: Double? = nil
+    @Published var avPlayer: AVPlayer? = nil
     
-    weak var avPlayer: AVPlayer?
     var timer: Timer?
     var hideTimer: Timer?
     
-    func start(player avPlayer: AVPlayer? = nil) {
-        self.avPlayer = avPlayer
+    private var timeObserver: Any?
+    private var statusObserver: NSKeyValueObservation?
+    private var likelyToKeepUpObserver: NSKeyValueObservation?
+    private var emptyBufferObserver: NSKeyValueObservation?
+    private var isLive: Bool = false
+    
+    func playURL(_ urlString: String, isLive: Bool) {
+        cleanUpPlayer()
+        self.isLive = isLive
+        let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        
+        let actualURL = getModdedURL(from: normalized, isLive: isLive)
+        let asset = AVURLAsset(url: actualURL)
+        let item = AVPlayerItem(asset: asset)
+        
+        if isLive {
+            item.preferredPeakBitRate = 0
+            item.preferredForwardBufferDuration = 5
+        }
+        
+        let newPlayer = AVPlayer(playerItem: item)
+        newPlayer.automaticallyWaitsToMinimizeStalling = true
+        self.avPlayer = newPlayer
+        self.isPlaying = true
+        self.resolutionString = "Bağlanıyor..."
+        
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
+        try? AVAudioSession.sharedInstance().setActive(true)
+        
+        timeObserver = newPlayer.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
+            guard let self = self else { return }
+            if !self.isScrubbing {
+                self.currentTime = time.seconds
+            }
+            if let duration = newPlayer.currentItem?.duration, duration.isNumeric {
+                self.duration = duration.seconds
+            }
+        }
+        
+        statusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self] item, change in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                switch item.status {
+                case .readyToPlay:
+                    self.resolutionString = isLive ? "1080p (Canlı)" : "1080p"
+                    self.isPlaying = true
+                    if let duration = item.duration.isNumeric ? item.duration.seconds : nil, duration > 0 {
+                        self.duration = duration
+                    }
+                case .failed:
+                    self.resolutionString = "Hata"
+                    self.isPlaying = false
+                case .unknown:
+                    self.resolutionString = "Yükleniyor..."
+                @unknown default:
+                    break
+                }
+            }
+        }
+        
+        likelyToKeepUpObserver = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, _ in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                if item.isPlaybackLikelyToKeepUp {
+                    self.resolutionString = isLive ? "1080p (Canlı)" : "1080p"
+                }
+            }
+        }
+        
+        emptyBufferObserver = item.observe(\.isPlaybackBufferEmpty, options: [.new]) { [weak self] item, _ in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                if item.isPlaybackBufferEmpty {
+                    self.resolutionString = "Ara Bellek..."
+                }
+            }
+        }
+        
+        NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidReachEnd), name: .AVPlayerItemDidPlayToEndTime, object: item)
+        
+        newPlayer.play()
         timer?.invalidate()
         userTapped()
     }
     
-    func update() {
+    @objc private func playerItemDidReachEnd(notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.isPlaying = false
+        }
     }
     
     func togglePlayPause() {
@@ -284,11 +368,28 @@ class PlayerInfoManager: ObservableObject {
         }
     }
     
+    func cleanUpPlayer() {
+        if let timeObserver = timeObserver {
+            avPlayer?.removeTimeObserver(timeObserver)
+            self.timeObserver = nil
+        }
+        statusObserver?.invalidate()
+        statusObserver = nil
+        likelyToKeepUpObserver?.invalidate()
+        likelyToKeepUpObserver = nil
+        emptyBufferObserver?.invalidate()
+        emptyBufferObserver = nil
+        
+        NotificationCenter.default.removeObserver(self)
+        
+        avPlayer?.pause()
+        avPlayer = nil
+    }
+    
     func stop() {
         timer?.invalidate()
         hideTimer?.invalidate()
-        avPlayer?.pause()
-        avPlayer = nil
+        cleanUpPlayer()
         DispatchQueue.main.async {
             self.resolutionString = "Bağlanıyor..."
             self.isPlaying = false
@@ -300,6 +401,7 @@ class PlayerInfoManager: ObservableObject {
     deinit {
         timer?.invalidate()
         hideTimer?.invalidate()
+        cleanUpPlayer()
     }
 }
 
@@ -341,36 +443,158 @@ class AVPlayerContainerView: UIView {
     }
 }
 
+// MARK: - High-Performance Built-in Local HLS Proxy Server for .ts Streams
+class LocalHTTPServer {
+    static let shared = LocalHTTPServer()
+    private var listener: NWListener?
+    private(set) var port: UInt16 = 0
+    
+    func start() {
+        guard listener == nil else { return }
+        
+        do {
+            let parameters = NWParameters.tcp
+            let listener = try NWListener(using: parameters, on: .any)
+            self.listener = listener
+            
+            listener.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    if let portValue = listener.port {
+                        self.port = portValue.rawValue
+                        print("Local HTTPServer started on port: \(self.port)")
+                    }
+                case .failed(let error):
+                    print("Local HTTPServer failed: \(error)")
+                default:
+                    break
+                }
+            }
+            
+            listener.newConnectionHandler = { [weak self] connection in
+                self?.handleConnection(connection)
+            }
+            
+            listener.start(queue: DispatchQueue.global(qos: .userInitiated))
+        } catch {
+            print("Failed to start NWListener: \(error)")
+        }
+    }
+    
+    func getProxyURL(for originalURL: String, isLive: Bool) -> URL {
+        if port == 0 {
+            start()
+            var count = 0
+            while port == 0 && count < 30 {
+                Thread.sleep(forTimeInterval: 0.01)
+                count += 1
+            }
+        }
+        
+        let utf8Data = originalURL.data(using: .utf8)!
+        let base64String = utf8Data.base64EncodedString()
+        let liveStr = isLive ? "true" : "false"
+        let urlSafeBase64 = base64String.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? base64String
+        
+        return URL(string: "http://127.0.0.1:\(port)/playlist?data=\(urlSafeBase64)&live=\(liveStr)") ?? URL(string: originalURL)!
+    }
+    
+    private func handleConnection(_ connection: NWConnection) {
+        connection.start(queue: DispatchQueue.global(qos: .default))
+        receiveRequest(connection)
+    }
+    
+    private func receiveRequest(_ connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] content, context, isComplete, error in
+            guard let self = self, error == nil, let content = content else {
+                connection.cancel()
+                return
+            }
+            
+            let requestStr = String(decoding: content, as: UTF8.self)
+            
+            if let firstLine = requestStr.components(separatedBy: "\r\n").first, firstLine.contains("GET /playlist") {
+                var parsedURLString: String? = nil
+                var isLiveStream = false
+                
+                if let dataRange = firstLine.range(of: "data=") {
+                    let suffix = firstLine[dataRange.upperBound...]
+                    let base64Encoded: String
+                    if let endRange = suffix.range(of: "&") {
+                        base64Encoded = String(suffix[..<endRange.lowerBound])
+                    } else if let endRange = suffix.range(of: " ") {
+                        base64Encoded = String(suffix[..<endRange.lowerBound])
+                    } else {
+                        base64Encoded = String(suffix)
+                    }
+                    
+                    if let percentDecoded = base64Encoded.removingPercentEncoding,
+                       let decodedData = Data(base64Encoded: percentDecoded),
+                       let decodedURLString = String(data: decodedData, encoding: .utf8) {
+                        parsedURLString = decodedURLString
+                    }
+                }
+                
+                if firstLine.contains("live=true") {
+                    isLiveStream = true
+                }
+                
+                if let streamURL = parsedURLString {
+                    let targetDuration = isLiveStream ? 86400 : 3600
+                    let playlist = """
+                    #EXTM3U
+                    #EXT-X-VERSION:3
+                    #EXT-X-TARGETDURATION:\(targetDuration)
+                    #EXT-X-MEDIA-SEQUENCE:0
+                    #EXTINF:\(targetDuration).0,
+                    \(streamURL)
+                    \(isLiveStream ? "" : "#EXT-X-ENDLIST")
+                    """
+                    
+                    let playlistData = playlist.data(using: .utf8)!
+                    let response = """
+                    HTTP/1.1 200 OK\r
+                    Content-Type: application/x-mpegURL\r
+                    Content-Length: \(playlistData.count)\r
+                    Connection: close\r
+                    Access-Control-Allow-Origin: *\r
+                    \r
+                    """
+                    
+                    var responseData = response.data(using: .utf8)!
+                    responseData.append(playlistData)
+                    
+                    connection.send(content: responseData, completion: .contentProcessed({ _ in
+                        connection.cancel()
+                    }))
+                    return
+                }
+            }
+            
+            let badResponse = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n"
+            connection.send(content: badResponse.data(using: .utf8)!, completion: .contentProcessed({ _ in
+                connection.cancel()
+            }))
+        }
+    }
+}
+
 func getModdedURL(from urlString: String, isLive: Bool) -> URL {
     let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let originalURL = URL(string: normalized) else {
         return URL(string: "about:blank")!
     }
     
-    let path = originalURL.path.lowercased()
-    if path.hasSuffix(".ts") || urlString.contains(".ts?") || urlString.contains("/mpegts") || urlString.contains("type=mpts") || urlString.contains("/ts/") {
-        let tempDir = FileManager.default.temporaryDirectory
-        let hash = abs(normalized.hashValue)
-        let filename = "stream_\(hash).m3u8"
-        let fileURL = tempDir.appendingPathComponent(filename)
-        
-        let targetDuration = isLive ? 86400 : 3600
-        let playlistContent = """
-        #EXTM3U
-        #EXT-X-VERSION:3
-        #EXT-X-TARGETDURATION:\(targetDuration)
-        #EXT-X-MEDIA-SEQUENCE:0
-        #EXTINF:\(targetDuration).0,
-        \(normalized)
-        \(isLive ? "" : "#EXT-X-ENDLIST")
-        """
-        
-        do {
-            try playlistContent.write(to: fileURL, atomically: true, encoding: .utf8)
-            return fileURL
-        } catch {
-            print("Failed to write modded m3u8: \(error)")
-        }
+    let lowercaseURL = normalized.lowercased()
+    
+    // Check if the URL points to a .ts stream or has any TS identifiers
+    if lowercaseURL.hasSuffix(".ts") || 
+       lowercaseURL.contains(".ts?") || 
+       lowercaseURL.contains("/mpegts") || 
+       lowercaseURL.contains("type=mpts") || 
+       lowercaseURL.contains("/ts/") || 
+       lowercaseURL.contains("output=ts") {
+        return LocalHTTPServer.shared.getProxyURL(for: normalized, isLive: isLive)
     }
     
     return originalURL
@@ -384,142 +608,21 @@ struct NativeVideoPlayerView: UIViewRepresentable {
     
     class Coordinator: NSObject {
         var currentUrl: String = ""
-        var player: AVPlayer?
-        weak var infoManager: PlayerInfoManager?
-        var timeObserver: Any?
-        var statusObserver: NSKeyValueObservation?
-        var likelyToKeepUpObserver: NSKeyValueObservation?
-        var emptyBufferObserver: NSKeyValueObservation?
-        var isLive: Bool = false
-        
-        init(infoManager: PlayerInfoManager) {
-            self.infoManager = infoManager
-            super.init()
-        }
-        
-        func setupPlayer(with url: URL, isLive: Bool) {
-            cleanUp()
-            self.isLive = isLive
-            
-            let asset = AVURLAsset(url: url)
-            let item = AVPlayerItem(asset: asset)
-            
-            if isLive {
-                item.preferredPeakBitRate = 0
-                item.preferredForwardBufferDuration = 5
-            }
-            
-            let newPlayer = AVPlayer(playerItem: item)
-            newPlayer.automaticallyWaitsToMinimizeStalling = true
-            self.player = newPlayer
-            
-            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
-            try? AVAudioSession.sharedInstance().setActive(true)
-            
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self, let infoManager = self.infoManager else { return }
-                infoManager.avPlayer = newPlayer
-                infoManager.isPlaying = true
-                infoManager.resolutionString = "Bağlanıyor..."
-            }
-            
-            timeObserver = newPlayer.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
-                guard let self = self, let infoManager = self.infoManager else { return }
-                if !infoManager.isScrubbing {
-                    infoManager.currentTime = time.seconds
-                }
-                if let duration = newPlayer.currentItem?.duration, duration.isNumeric {
-                    infoManager.duration = duration.seconds
-                }
-            }
-            
-            statusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self] item, change in
-                guard let self = self, let infoManager = self.infoManager else { return }
-                DispatchQueue.main.async {
-                    switch item.status {
-                    case .readyToPlay:
-                        infoManager.resolutionString = self.isLive ? "1080p (Canlı)" : "1080p"
-                        infoManager.isPlaying = true
-                        if let duration = item.duration.isNumeric ? item.duration.seconds : nil, duration > 0 {
-                            infoManager.duration = duration
-                        }
-                    case .failed:
-                        infoManager.resolutionString = "Hata"
-                        infoManager.isPlaying = false
-                    case .unknown:
-                        infoManager.resolutionString = "Yükleniyor..."
-                    @unknown default:
-                        break
-                    }
-                }
-            }
-            
-            likelyToKeepUpObserver = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, _ in
-                guard let self = self, let infoManager = self.infoManager else { return }
-                DispatchQueue.main.async {
-                    if item.isPlaybackLikelyToKeepUp {
-                        infoManager.resolutionString = self.isLive ? "1080p (Canlı)" : "1080p"
-                    }
-                }
-            }
-            
-            emptyBufferObserver = item.observe(\.isPlaybackBufferEmpty, options: [.new]) { [weak self] item, _ in
-                guard let self = self, let infoManager = self.infoManager else { return }
-                DispatchQueue.main.async {
-                    if item.isPlaybackBufferEmpty {
-                        infoManager.resolutionString = "Ara Bellek..."
-                    }
-                }
-            }
-            
-            NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidReachEnd), name: .AVPlayerItemDidPlayToEndTime, object: item)
-            
-            newPlayer.play()
-        }
-        
-        @objc func playerItemDidReachEnd(notification: Notification) {
-            DispatchQueue.main.async { [weak self] in
-                self?.infoManager?.isPlaying = false
-            }
-        }
-        
-        func cleanUp() {
-            if let timeObserver = timeObserver {
-                player?.removeTimeObserver(timeObserver)
-                self.timeObserver = nil
-            }
-            statusObserver?.invalidate()
-            statusObserver = nil
-            likelyToKeepUpObserver?.invalidate()
-            likelyToKeepUpObserver = nil
-            emptyBufferObserver?.invalidate()
-            emptyBufferObserver = nil
-            
-            NotificationCenter.default.removeObserver(self)
-            
-            player?.pause()
-            player = nil
-        }
-        
-        deinit {
-            cleanUp()
-        }
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator(infoManager: infoManager)
+        Coordinator()
     }
     
     func makeUIView(context: Context) -> AVPlayerContainerView {
         let view = AVPlayerContainerView()
-        context.coordinator.infoManager = infoManager
+        view.player = infoManager.avPlayer
         return view
     }
     
     func updateUIView(_ uiView: AVPlayerContainerView, context: Context) {
         let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
-            context.coordinator.cleanUp()
             uiView.player = nil
             return
         }
@@ -534,18 +637,15 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         
         if context.coordinator.currentUrl != normalized {
             context.coordinator.currentUrl = normalized
-            
-            let targetURL = getModdedURL(from: normalized, isLive: isLive)
-            context.coordinator.setupPlayer(with: targetURL, isLive: isLive)
+            infoManager.playURL(normalized, isLive: isLive)
         }
         
-        if uiView.player !== context.coordinator.player {
-            uiView.player = context.coordinator.player
+        if uiView.player !== infoManager.avPlayer {
+            uiView.player = infoManager.avPlayer
         }
     }
     
     static func dismantleUIView(_ uiView: AVPlayerContainerView, coordinator: Coordinator) {
-        coordinator.cleanUp()
         uiView.player = nil
     }
 }
@@ -2846,6 +2946,7 @@ struct ContentView: View {
                                     
                                     // Refresh Stream Button
                                     Button(action: {
+                                        globalPlayerInfo.stop()
                                         let oldChan = channel
                                         selectedChannel = nil
                                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -3435,6 +3536,7 @@ struct ContentView: View {
     
     // MARK: - Authentication Logouts
     func logoutAccount() {
+        globalPlayerInfo.stop()
         channels = []
         selectedChannel = nil
         m3uUrl = ""
@@ -3639,6 +3741,7 @@ struct ContentView: View {
     }
     
     func switchAccount(to account: IPTVAccount) {
+        globalPlayerInfo.stop()
         selectedChannel = nil
         activeAccountIdString = account.id.uuidString
         iptvMode = account.mode
