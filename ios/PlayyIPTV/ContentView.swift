@@ -4,7 +4,6 @@ import Combine
 import AVFoundation
 import MediaPlayer
 import zlib
-import KSPlayer
 
 // MARK: - Safe Decoder Int/String Helper for Xtream Codes Compatibility
 enum SafeStringOrInt: Codable, Hashable {
@@ -212,43 +211,44 @@ class PlayerInfoManager: ObservableObject {
     @Published var isScrubbing: Bool = false
     @Published var scrubbingTime: Double? = nil
     
-    weak var ksPlayer: VideoPlayerView?
+    weak var avPlayer: AVPlayer?
     var timer: Timer?
     var hideTimer: Timer?
     
-    func start(player ksPlayer: VideoPlayerView? = nil) {
-        self.ksPlayer = ksPlayer
+    func start(player avPlayer: AVPlayer? = nil) {
+        self.avPlayer = avPlayer
         timer?.invalidate()
         userTapped()
     }
     
     func update() {
-        // No-op or removed, keeping definition empty if it's called elsewhere
     }
     
     func togglePlayPause() {
-        if let ks = ksPlayer {
+        if let player = avPlayer {
             if isPlaying {
-                ks.pause()
+                player.pause()
                 isPlaying = false
             } else {
-                ks.play()
+                player.play()
                 isPlaying = true
             }
         }
     }
     
     func seek(to seconds: Double) {
-        if let ks = ksPlayer {
-            ks.seek(time: seconds) { _ in }
+        if let player = avPlayer {
+            let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
+            player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero)
             self.currentTime = seconds
         }
     }
     
     func scrubValueUpdated(to seconds: Double) {
         scrubbingTime = seconds
-        if let ks = ksPlayer {
-            ks.seek(time: seconds) { _ in }
+        if let player = avPlayer {
+            let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
+            player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero)
         }
     }
     
@@ -258,8 +258,9 @@ class PlayerInfoManager: ObservableObject {
             scrubbingTime = nil
             return
         }
-        if let ks = ksPlayer {
-            ks.seek(time: seconds) { [weak self] _ in
+        if let player = avPlayer {
+            let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
+            player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
                 DispatchQueue.main.async {
                     self?.currentTime = seconds
                     self?.isScrubbing = false
@@ -286,8 +287,8 @@ class PlayerInfoManager: ObservableObject {
     func stop() {
         timer?.invalidate()
         hideTimer?.invalidate()
-        ksPlayer?.pause()
-        ksPlayer = nil
+        avPlayer?.pause()
+        avPlayer = nil
         DispatchQueue.main.async {
             self.resolutionString = "Bağlanıyor..."
             self.isPlaying = false
@@ -302,33 +303,41 @@ class PlayerInfoManager: ObservableObject {
     }
 }
 
-// MARK: - Native iOS High-Performance IPTV KSPlayer
-class PlayerContainerView: UIView {
-    var ksPlayerView: VideoPlayerView?
-    private var isLive: Bool = false
+// MARK: - Native iOS High-Performance IPTV AVPlayer Container
+class AVPlayerContainerView: UIView {
+    private var playerLayer: AVPlayerLayer?
+    var player: AVPlayer? {
+        didSet {
+            playerLayer?.player = player
+        }
+    }
     
-    init(frame: CGRect, isLive: Bool) {
-        self.isLive = isLive
-        super.init(frame: frame)
-        self.backgroundColor = .black
-        setupSubviews()
+    init() {
+        super.init(frame: .zero)
+        backgroundColor = .black
+        setupPlayerLayer()
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        backgroundColor = .black
+        setupPlayerLayer()
     }
     
-    private func setupSubviews() {
-        let ks = VideoPlayerView()
-        ks.translatesAutoresizingMaskIntoConstraints = false
-        self.addSubview(ks)
-        NSLayoutConstraint.activate([
-            ks.topAnchor.constraint(equalTo: self.topAnchor),
-            ks.bottomAnchor.constraint(equalTo: self.bottomAnchor),
-            ks.leadingAnchor.constraint(equalTo: self.leadingAnchor),
-            ks.trailingAnchor.constraint(equalTo: self.trailingAnchor)
-        ])
-        self.ksPlayerView = ks
+    private func setupPlayerLayer() {
+        let layer = AVPlayerLayer()
+        layer.videoGravity = .resizeAspect
+        self.layer.addSublayer(layer)
+        self.playerLayer = layer
+    }
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        playerLayer?.frame = bounds
+    }
+    
+    func setVideoGravity(_ gravity: AVLayerVideoGravity) {
+        playerLayer?.videoGravity = gravity
     }
 }
 
@@ -336,114 +345,199 @@ struct NativeVideoPlayerView: UIViewRepresentable {
     let urlString: String
     let videoContentMode: UIView.ContentMode
     @ObservedObject var infoManager: PlayerInfoManager
-    var showsPlaybackControls: Bool = true
     var isLive: Bool = false
     
-    class Coordinator: NSObject, PlayerControllerDelegate {
+    class Coordinator: NSObject {
         var currentUrl: String = ""
-        var containerView: PlayerContainerView?
+        var player: AVPlayer?
         weak var infoManager: PlayerInfoManager?
-        var isLive: Bool
+        var timeObserver: Any?
+        var statusObserver: NSKeyValueObservation?
+        var likelyToKeepUpObserver: NSKeyValueObservation?
+        var emptyBufferObserver: NSKeyValueObservation?
+        var isLive: Bool = false
         
-        init(infoManager: PlayerInfoManager, isLive: Bool = false) {
+        init(infoManager: PlayerInfoManager) {
             self.infoManager = infoManager
-            self.isLive = isLive
             super.init()
         }
         
-        func playerController(state: KSPlayerState) {
+        func setupPlayer(with url: URL, isLive: Bool) {
+            cleanUp()
+            self.isLive = isLive
+            
+            let asset = AVURLAsset(url: url)
+            let item = AVPlayerItem(asset: asset)
+            
+            if isLive {
+                item.preferredPeakBitRate = 0
+                item.preferredForwardBufferDuration = 5
+            }
+            
+            let newPlayer = AVPlayer(playerItem: item)
+            newPlayer.automaticallyWaitsToMinimizeStalling = true
+            self.player = newPlayer
+            
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
+            try? AVAudioSession.sharedInstance().setActive(true)
+            
             DispatchQueue.main.async { [weak self] in
                 guard let self = self, let infoManager = self.infoManager else { return }
-                switch state {
-                case .preparing:
-                    infoManager.resolutionString = "Yükleniyor..."
-                case .readyToPlay:
-                    infoManager.resolutionString = self.isLive ? "1080p (Canlı)" : "1080p"
-                    infoManager.isPlaying = true
-                case .buffering:
-                    infoManager.resolutionString = "Ara Bellek..."
-                case .bufferFinished:
-                    infoManager.resolutionString = self.isLive ? "1080p (Canlı)" : "1080p"
-                    infoManager.isPlaying = true
-                case .playedToTheEnd:
-                    infoManager.isPlaying = false
-                case .error:
-                    infoManager.resolutionString = "Hata"
-                @unknown default:
-                    break
-                }
+                infoManager.avPlayer = newPlayer
+                infoManager.isPlaying = true
+                infoManager.resolutionString = "Bağlanıyor..."
             }
-        }
-        
-        func playerController(currentTime: TimeInterval, totalTime: TimeInterval) {
-            DispatchQueue.main.async { [weak self] in
+            
+            timeObserver = newPlayer.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
                 guard let self = self, let infoManager = self.infoManager else { return }
                 if !infoManager.isScrubbing {
-                    infoManager.currentTime = currentTime
+                    infoManager.currentTime = time.seconds
                 }
-                if totalTime > 0 {
-                    infoManager.duration = totalTime
+                if let duration = newPlayer.currentItem?.duration, duration.isNumeric {
+                    infoManager.duration = duration.seconds
                 }
             }
+            
+            statusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self] item, change in
+                guard let self = self, let infoManager = self.infoManager else { return }
+                DispatchQueue.main.async {
+                    switch item.status {
+                    case .readyToPlay:
+                        infoManager.resolutionString = self.isLive ? "1080p (Canlı)" : "1080p"
+                        infoManager.isPlaying = true
+                        if let duration = item.duration.isNumeric ? item.duration.seconds : nil, duration > 0 {
+                            infoManager.duration = duration
+                        }
+                    case .failed:
+                        infoManager.resolutionString = "Hata"
+                        infoManager.isPlaying = false
+                    case .unknown:
+                        infoManager.resolutionString = "Yükleniyor..."
+                    @unknown default:
+                        break
+                    }
+                }
+            }
+            
+            likelyToKeepUpObserver = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, _ in
+                guard let self = self, let infoManager = self.infoManager else { return }
+                DispatchQueue.main.async {
+                    if item.isPlaybackLikelyToKeepUp {
+                        infoManager.resolutionString = self.isLive ? "1080p (Canlı)" : "1080p"
+                    }
+                }
+            }
+            
+            emptyBufferObserver = item.observe(\.isPlaybackBufferEmpty, options: [.new]) { [weak self] item, _ in
+                guard let self = self, let infoManager = self.infoManager else { return }
+                DispatchQueue.main.async {
+                    if item.isPlaybackBufferEmpty {
+                        infoManager.resolutionString = "Ara Bellek..."
+                    }
+                }
+            }
+            
+            newPlayer.play()
         }
         
-        func playerController(finish error: Error?) {}
-        func playerController(maskShow: Bool) {}
-        func playerController(action: PlayerButtonType) {}
-        func playerController(bufferedCount: Int, consumeTime: TimeInterval) {}
-        func playerController(seek: TimeInterval) {}
+        func cleanUp() {
+            if let timeObserver = timeObserver {
+                player?.removeTimeObserver(timeObserver)
+                self.timeObserver = nil
+            }
+            statusObserver?.invalidate()
+            statusObserver = nil
+            likelyToKeepUpObserver?.invalidate()
+            likelyToKeepUpObserver = nil
+            emptyBufferObserver?.invalidate()
+            emptyBufferObserver = nil
+            
+            player?.pause()
+            player = nil
+        }
+        
+        deinit {
+            cleanUp()
+        }
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator(infoManager: infoManager, isLive: isLive)
+        Coordinator(infoManager: infoManager)
     }
     
-    func makeUIView(context: Context) -> PlayerContainerView {
-        let view = PlayerContainerView(frame: .zero, isLive: isLive)
-        
-        if let ksView = view.ksPlayerView {
-            ksView.delegate = context.coordinator
-        }
-        
-        context.coordinator.containerView = view
+    func makeUIView(context: Context) -> AVPlayerContainerView {
+        let view = AVPlayerContainerView()
+        context.coordinator.infoManager = infoManager
         return view
     }
     
-    func updateUIView(_ uiView: PlayerContainerView, context: Context) {
+    func updateUIView(_ uiView: AVPlayerContainerView, context: Context) {
         let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
-            uiView.ksPlayerView?.pause()
+            context.coordinator.cleanUp()
+            uiView.player = nil
             return
+        }
+        
+        if videoContentMode == .scaleAspectFill {
+            uiView.setVideoGravity(.resizeAspectFill)
+        } else if videoContentMode == .scaleToFill {
+            uiView.setVideoGravity(.resize)
+        } else {
+            uiView.setVideoGravity(.resizeAspect)
         }
         
         if context.coordinator.currentUrl != normalized {
             context.coordinator.currentUrl = normalized
             
-            if let ksView = uiView.ksPlayerView {
-                if let targetUrl = URL(string: normalized) {
-                    try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
-                    try? AVAudioSession.sharedInstance().setActive(true)
-                    
-                    let opt = KSOptions()
-                    opt.hardwareDecode = true
-                    
-                    ksView.set(url: targetUrl, options: opt)
-                    ksView.play()
-                    
-                    DispatchQueue.main.async {
-                        context.coordinator.infoManager?.isPlaying = true
-                        context.coordinator.infoManager?.ksPlayer = ksView
-                    }
-                }
-            }
+            let targetURL = getModdedURL(from: normalized, isLive: isLive)
+            context.coordinator.setupPlayer(with: targetURL, isLive: isLive)
+        }
+        
+        if uiView.player !== context.coordinator.player {
+            uiView.player = context.coordinator.player
         }
     }
     
-    static func dismantleUIView(_ uiView: PlayerContainerView, coordinator: Coordinator) {
-        uiView.ksPlayerView?.pause()
-        uiView.ksPlayerView?.resetPlayer()
-        uiView.ksPlayerView?.removeFromSuperview()
+    static func dismantleUIView(_ uiView: AVPlayerContainerView, coordinator: Coordinator) {
+        coordinator.cleanUp()
+        uiView.player = nil
     }
+}
+
+func getModdedURL(from urlString: String, isLive: Bool) -> URL {
+    let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let originalURL = URL(string: normalized) else {
+        return URL(string: "about:blank")!
+    }
+    
+    let path = originalURL.path.lowercased()
+    if path.hasSuffix(".ts") || urlString.contains(".ts?") || urlString.contains("/mpegts") || urlString.contains("type=mpts") {
+        let tempDir = FileManager.default.temporaryDirectory
+        let hash = abs(normalized.hashValue)
+        let filename = "stream_\(hash).m3u8"
+        let fileURL = tempDir.appendingPathComponent(filename)
+        
+        let targetDuration = isLive ? 86400 : 3600
+        let playlistContent = """
+        #EXTM3U
+        #EXT-X-VERSION:3
+        #EXT-X-TARGETDURATION:\(targetDuration)
+        #EXT-X-MEDIA-SEQUENCE:0
+        #EXTINF:\(targetDuration).0,
+        \(normalized)
+        \(isLive ? "" : "#EXT-X-ENDLIST")
+        """
+        
+        do {
+            try playlistContent.write(to: fileURL, atomically: true, encoding: .utf8)
+            return fileURL
+        } catch {
+            print("Failed to write modded m3u8: \(error)")
+        }
+    }
+    
+    return originalURL
 }
 
 // MARK: - Modern Player Overlay: Clock, Quality
@@ -2404,8 +2498,10 @@ struct ContentView: View {
                                                 .font(.system(size: 16, weight: .medium))
                                                 .foregroundColor(showLandscapeSettings ? Color(hex: "007FFF") : .white)
                                                 .frame(width: 44, height: 44)
-                                                .background(Color.black.opacity(0.45))
+                                                .background(.ultraThinMaterial)
+                                                .environment(\.colorScheme, .dark)
                                                 .clipShape(Circle())
+                                                .overlay(Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.8))
                                         }
                                         
                                         Button(action: {
@@ -2416,8 +2512,10 @@ struct ContentView: View {
                                                 .font(.system(size: 16, weight: .medium))
                                                 .foregroundColor(favourites.contains(channel.url) ? .yellow : .white)
                                                 .frame(width: 44, height: 44)
-                                                .background(Color.black.opacity(0.45))
+                                                .background(.ultraThinMaterial)
+                                                .environment(\.colorScheme, .dark)
                                                 .clipShape(Circle())
+                                                .overlay(Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.8))
                                         }
                                         
                                         Button(action: {
@@ -2432,8 +2530,10 @@ struct ContentView: View {
                                                 .font(.system(size: 16, weight: .medium))
                                                 .foregroundColor(showLandscapeChannelList ? Color(hex: "007FFF") : .white)
                                                 .frame(width: 44, height: 44)
-                                                .background(Color.black.opacity(0.45))
+                                                .background(.ultraThinMaterial)
+                                                .environment(\.colorScheme, .dark)
                                                 .clipShape(Circle())
+                                                .overlay(Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.8))
                                         }
                                     }
                                 }
@@ -2488,8 +2588,13 @@ struct ContentView: View {
                                             .foregroundColor(selectedLandscapeGroup == "Tümü" ? .white : .white.opacity(0.6))
                                             .padding(.horizontal, 12)
                                             .padding(.vertical, 6)
-                                            .background(selectedLandscapeGroup == "Tümü" ? Color(hex: "007FFF") : Color.white.opacity(0.08))
+                                            .background(selectedLandscapeGroup == "Tümü" ? Color(hex: "007FFF").opacity(0.25) : Color.white.opacity(0.04))
+                                            .background(.ultraThinMaterial)
                                             .cornerRadius(12)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .stroke(selectedLandscapeGroup == "Tümü" ? Color(hex: "007FFF").opacity(0.6) : Color.white.opacity(0.08), lineWidth: 0.8)
+                                            )
                                     }
                                     .buttonStyle(PlainButtonStyle())
                                     
@@ -2506,8 +2611,13 @@ struct ContentView: View {
                                                 .foregroundColor(selectedLandscapeGroup == grp ? .white : .white.opacity(0.6))
                                                 .padding(.horizontal, 12)
                                                 .padding(.vertical, 6)
-                                                .background(selectedLandscapeGroup == grp ? Color(hex: "007FFF") : Color.white.opacity(0.08))
+                                                .background(selectedLandscapeGroup == grp ? Color(hex: "007FFF").opacity(0.25) : Color.white.opacity(0.04))
+                                                .background(.ultraThinMaterial)
                                                 .cornerRadius(12)
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 12)
+                                                        .stroke(selectedLandscapeGroup == grp ? Color(hex: "007FFF").opacity(0.6) : Color.white.opacity(0.08), lineWidth: 0.8)
+                                                )
                                         }
                                         .buttonStyle(PlainButtonStyle())
                                     }
@@ -2571,8 +2681,13 @@ struct ContentView: View {
                                                 }
                                                 .padding(.horizontal, 12)
                                                 .padding(.vertical, 8)
-                                                .background(selectedChannel?.url == ch.url ? Color.white.opacity(0.08) : Color.clear)
+                                                .background(selectedChannel?.url == ch.url ? Color(hex: "007FFF").opacity(0.2) : Color.white.opacity(0.02))
+                                                .background(.ultraThinMaterial)
                                                 .cornerRadius(8)
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 8)
+                                                        .stroke(selectedChannel?.url == ch.url ? Color(hex: "007FFF").opacity(0.6) : Color.white.opacity(0.06), lineWidth: 0.8)
+                                                )
                                             }
                                             .buttonStyle(PlainButtonStyle())
                                             .id(ch.url)
@@ -5569,11 +5684,12 @@ struct ChannelRowView: View {
             }
             .padding(12)
         }
-        .background(isSelected ? Color(hex: "1E2132") : Color(hex: "171926"))
+        .background(isSelected ? Color(hex: "6D28D9").opacity(0.22) : Color.white.opacity(0.02))
+        .background(.ultraThinMaterial)
         .cornerRadius(14)
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(isSelected ? Color(hex: "6D28D9").opacity(0.4) : Color.white.opacity(0.04), lineWidth: 1)
+                .strokeBorder(isSelected ? Color(hex: "6D28D9").opacity(0.6) : Color.white.opacity(0.08), lineWidth: 0.8)
         )
         .onTapGesture(perform: onTapChannel)
     }
