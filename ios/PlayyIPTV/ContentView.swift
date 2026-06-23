@@ -601,17 +601,33 @@ struct ContentView: View {
                 .opacity(0.18)
                 .ignoresSafeArea()
                 
-                if isLandscape, let _ = selectedChannel {
-                    landscapePlayerView
-                        .background(Color.black)
-                        .ignoresSafeArea()
-                        .zIndex(2000)
-                } else {
-                    VStack(spacing: 0) {
-                        if let channel = selectedChannel {
-                            globalPortraitPlayerView
-                                .frame(height: geo.size.height * 0.35)
+                VStack(spacing: 0) {
+                    if let channel = selectedChannel {
+                        if !isLandscape {
+                            portraitPlayerHeader
+                        }
+                        
+                        ZStack {
+                            NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo, isLive: channel.contentType == "live")
+                                .background(Color.black)
+                                .ignoresSafeArea(edges: isLandscape ? .all : [])
                             
+                            if isLandscape {
+                                landscapePlayerView
+                            } else {
+                                portraitPlayerOverlays
+                            }
+                        }
+                        .frame(width: isLandscape ? geo.size.width : nil, height: isLandscape ? geo.size.height : geo.size.height * 0.3)
+                        .background(Color.black)
+                        .zIndex(2000)
+                        .onTapGesture {
+                            if !isLandscape {
+                                withAnimation { globalPlayerInfo.isOverlayVisible.toggle() }
+                            }
+                        }
+                        
+                        if !isLandscape {
                             if channel.contentType != "live" {
                                 ScrollView {
                                     VStack(alignment: .leading, spacing: 20) {
@@ -640,13 +656,15 @@ struct ContentView: View {
                                 mainTabContent
                                     .frame(height: geo.size.height * 0.65)
                             }
-                        } else {
-                            mainTabContent
-                                .frame(height: geo.size.height)
                         }
-                        Spacer(minLength: 0)
+                    } else {
+                        mainTabContent
+                            .frame(height: geo.size.height)
                     }
-                    
+                    Spacer(minLength: 0)
+                }
+                
+                if !isLandscape {
                     VStack {
                         Spacer()
                         floatingTabBar
@@ -815,168 +833,159 @@ struct ContentView: View {
     
     @State private var localLiveCategory: String = "Tümü"
     
-    var globalPortraitPlayerView: some View {
-        VStack(spacing: 0) {
-            if let channel = selectedChannel {
-                // Top Header (Dion Style)
-                HStack(spacing: 0) {
-                    Button(action: { closeSelectedChannel() }) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(Color.white.opacity(0.1))
-                            .clipShape(Circle())
-                    }
-                    
-                    Spacer(minLength: 10)
-                    
-                    VStack(spacing: 2) {
-                        Text(channel.name.uppercased())
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.white)
+    @ViewBuilder
+    var portraitPlayerHeader: some View {
+        if let channel = selectedChannel {
+            // Top Header (Dion Style)
+            HStack(spacing: 0) {
+                Button(action: { closeSelectedChannel() }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 44, height: 44)
+                        .background(Color.white.opacity(0.1))
+                        .clipShape(Circle())
+                }
+                
+                Spacer(minLength: 10)
+                
+                VStack(spacing: 2) {
+                    Text(channel.name.uppercased())
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    if channel.contentType == "live" {
+                        let prgName = EPGManager.shared.currentProgramName(for: channel)
+                        Text(prgName)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white.opacity(0.6))
                             .lineLimit(1)
-                        if channel.contentType == "live" {
-                            let prgName = EPGManager.shared.currentProgramName(for: channel)
-                            Text(prgName)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.white.opacity(0.6))
-                                .lineLimit(1)
-                        }
-                    }
-                    
-                    Spacer(minLength: 10)
-                    
-                    Button(action: { toggleFavourite(channel.url) }) {
-                        Image(systemName: favourites.contains(channel.url) ? "bookmark.fill" : "bookmark")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(Color.white.opacity(0.1))
-                            .clipShape(Circle())
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-                .padding(.bottom, 12)
                 
-                // Video Player Container
-                ZStack {
-                    NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo, isLive: channel.contentType == "live")
-                        .background(Color.black)
-                    
-                    if globalPlayerInfo.isOverlayVisible {
-                        Color.black.opacity(0.2).ignoresSafeArea()
-                        
-                        // Top Left Airplay
-                        VStack {
-                            HStack {
-                                Button(action: {}) {
-                                    Image(systemName: "rectangle.inset.filled.and.person.filled") // Mock for airplay/cast
-                                        .font(.system(size: 16, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .frame(width: 38, height: 38)
-                                        .background(Color.white.opacity(0.2))
-                                        .clipShape(Circle())
-                                }
-                                Spacer()
-                            }
-                            .padding(12)
-                            Spacer()
-                        }
-                        
-                        // Center Play/Pause
-                        Button(action: { globalPlayerInfo.togglePlayPause() }) {
-                            Image(systemName: globalPlayerInfo.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 26, weight: .bold))
+                Spacer(minLength: 10)
+                
+                Button(action: { toggleFavourite(channel.url) }) {
+                    Image(systemName: favourites.contains(channel.url) ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 44, height: 44)
+                        .background(Color.white.opacity(0.1))
+                        .clipShape(Circle())
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
+        }
+    }
+
+    @ViewBuilder
+    var portraitPlayerOverlays: some View {
+        if let channel = selectedChannel {
+            if globalPlayerInfo.isOverlayVisible {
+                Color.black.opacity(0.2).ignoresSafeArea()
+                
+                // Top Left Airplay
+                VStack {
+                    HStack {
+                        Button(action: {}) {
+                            Image(systemName: "rectangle.inset.filled.and.person.filled") // Mock for airplay/cast
+                                .font(.system(size: 16, weight: .bold))
                                 .foregroundColor(.white)
-                                .frame(width: 64, height: 64)
+                                .frame(width: 38, height: 38)
                                 .background(Color.white.opacity(0.2))
                                 .clipShape(Circle())
-                                .overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 1.5))
                         }
-                        
-                        // Bottom Details
-                        VStack {
-                            Spacer()
-                            HStack(alignment: .bottom) {
-                                HStack(spacing: 6) {
-                                    Circle()
-                                        .fill(Color.red)
-                                        .frame(width: 8, height: 8)
-                                    Text("CANLI  \(channel.name.uppercased())")
-                                        .font(.system(size: 13, weight: .bold))
-                                        .foregroundColor(.white)
-                                }
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 6) {
-                                    Button(action: { withAnimation { isLandscape = true } }) {
-                                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                            .font(.system(size: 14, weight: .bold))
-                                            .foregroundColor(.white)
-                                    }
-                                    
-                                    if channel.contentType == "live" {
-                                        let nextPrg = EPGManager.shared.nextProgramName(for: channel)
-                                        if !nextPrg.isEmpty {
-                                            Text(nextPrg.uppercased())
-                                                .font(.system(size: 9, weight: .bold))
-                                                .foregroundColor(.white.opacity(0.7))
-                                        }
-                                    }
-                                }
+                        Spacer()
+                    }
+                    .padding(12)
+                    Spacer()
+                }
+                
+                // Center Play/Pause
+                Button(action: { globalPlayerInfo.togglePlayPause() }) {
+                    Image(systemName: globalPlayerInfo.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 64, height: 64)
+                        .background(Color.white.opacity(0.2))
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 1.5))
+                }
+                
+                // Bottom Details
+                VStack {
+                    Spacer()
+                    HStack(alignment: .bottom) {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 8, height: 8)
+                            Text("CANLI  \(channel.name.uppercased())")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 6) {
+                            Button(action: { withAnimation { isLandscape = true } }) {
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(.white)
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 6)
                             
-                            // Progress Bar for Movies/Series in Portrait Player Overlay
-                            if channel.contentType != "live" {
-                                VStack(spacing: 4) {
-                                    Slider(
-                                        value: Binding(
-                                            get: { globalPlayerInfo.scrubbingTime ?? globalPlayerInfo.currentTime },
-                                            set: { val in globalPlayerInfo.scrubValueUpdated(to: val) }
-                                        ),
-                                        in: 0...max(1.0, globalPlayerInfo.duration),
-                                        onEditingChanged: { editing in
-                                            globalPlayerInfo.isScrubbing = editing
-                                            if !editing {
-                                                globalPlayerInfo.commitSeek()
-                                            }
-                                        }
-                                    )
-                                    .accentColor(Color(hex: "007FFF"))
-                                    
-                                    let displayTime = globalPlayerInfo.scrubbingTime ?? globalPlayerInfo.currentTime
-                                    HStack {
-                                        Text(formatTime(seconds: displayTime))
-                                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                            .foregroundColor(.white.opacity(0.8))
-                                        
-                                        Spacer()
-                                        
-                                        let remaining = globalPlayerInfo.duration - displayTime
-                                        Text("-" + formatTime(seconds: max(0, remaining)))
-                                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                            .foregroundColor(.white.opacity(0.8))
-                                    }
+                            if channel.contentType == "live" {
+                                let nextPrg = EPGManager.shared.nextProgramName(for: channel)
+                                if !nextPrg.isEmpty {
+                                    Text(nextPrg.uppercased())
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(.white.opacity(0.7))
                                 }
-                                .padding(.horizontal, 16)
-                                .padding(.bottom, 12)
-                                .environment(\.colorScheme, .dark)
                             }
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+                    
+                    // Progress Bar for Movies/Series in Portrait Player Overlay
+                    if channel.contentType != "live" {
+                        VStack(spacing: 4) {
+                            Slider(
+                                value: Binding(
+                                    get: { globalPlayerInfo.scrubbingTime ?? globalPlayerInfo.currentTime },
+                                    set: { val in globalPlayerInfo.scrubValueUpdated(to: val) }
+                                ),
+                                in: 0...max(1.0, globalPlayerInfo.duration),
+                                onEditingChanged: { editing in
+                                    globalPlayerInfo.isScrubbing = editing
+                                    if !editing {
+                                        globalPlayerInfo.commitSeek()
+                                    }
+                                }
+                            )
+                            .accentColor(Color(hex: "007FFF"))
+                            
+                            let displayTime = globalPlayerInfo.scrubbingTime ?? globalPlayerInfo.currentTime
+                            HStack {
+                                Text(formatTime(seconds: displayTime))
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.8))
+                                
+                                Spacer()
+                                
+                                let remaining = globalPlayerInfo.duration - displayTime
+                                Text("-" + formatTime(seconds: max(0, remaining)))
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.8))
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
+                        .environment(\.colorScheme, .dark)
+                    }
                 }
-                .onTapGesture {
-                    withAnimation { globalPlayerInfo.isOverlayVisible.toggle() }
-                }
-            } else {
-                Color(hex: "08090C")
-                Text("Kanal Seçin").foregroundColor(.white.opacity(0.3))
             }
         }
-        .clipped()
     }
     
     @State private var activeLiveCategory: String? = nil
@@ -2096,11 +2105,7 @@ struct ContentView: View {
 
     var landscapePlayerView: some View {
         ZStack {
-            if let channel = selectedChannel {
-                // 1. Core Native Player
-                NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo, showsPlaybackControls: false, isLive: channel.contentType == "live")
-                    .ignoresSafeArea()
-                
+            if let _ = selectedChannel {
                 // 2 & 3. Base Tap-to-toggle overlay & Swipe Gestures (Brightness/Volume)
                 GeometryReader { geo in
                     Color.black.opacity(0.005)
