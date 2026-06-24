@@ -392,8 +392,8 @@ class LocalHTTPServer {
     }
     
     private func receiveRequest(_ connection: NWConnection) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] content, context, isComplete, error in
-            guard let self = self, error == nil, let content = content else {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { content, context, isComplete, error in
+            guard error == nil, let content = content else {
                 connection.cancel()
                 return
             }
@@ -504,19 +504,14 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         func playerController(state: KSPlayerState) {
             DispatchQueue.main.async {
                 switch state {
-                case .idle:
-                    self.parent.infoManager.resolutionString = "Yükleniyor..."
-                case .preparing:
+                case .prepare:
                     self.parent.infoManager.resolutionString = "Bağlanıyor..."
                 case .readyToPlay:
                     self.parent.infoManager.resolutionString = self.parent.isLive ? "1080p (Canlı)" : "1080p"
                 case .buffering:
                     self.parent.infoManager.resolutionString = "Ara Bellek..."
-                case .playing:
-                    self.parent.infoManager.isPlaying = true
+                case .bufferFinished:
                     self.parent.infoManager.resolutionString = self.parent.isLive ? "1080p (Canlı)" : "1080p"
-                case .paused:
-                    self.parent.infoManager.isPlaying = false
                 case .playedToTheEnd:
                     self.parent.infoManager.isPlaying = false
                 case .error:
@@ -540,7 +535,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         }
         
         func playerController(finish error: Error?) {
-            if let error = error {
+            if error != nil {
                 DispatchQueue.main.async {
                     self.parent.infoManager.resolutionString = "Yayın Açılamadı"
                     self.parent.infoManager.isPlaying = false
@@ -597,12 +592,13 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         if context.coordinator.currentUrl != normalized {
             context.coordinator.currentUrl = normalized
             if let url = URL(string: normalized) {
-                KSOptions.firstPlayerType = KSAVPlayer.self
-                KSOptions.secondPlayerType = KSMEPlayer.self
+                KSOptions.firstPlayerType = KSMEPlayer.self
+                KSOptions.secondPlayerType = KSAVPlayer.self
                 KSOptions.isAutoPlay = true
                 
                 let options = KSOptions()
                 options.hardwareDecode = true
+                options.prepareMaxAnalyzeDuration = 2000
                 
                 let resource = KSPlayerResource(url: url, options: options, name: "")
                 uiView.set(resource: resource)
