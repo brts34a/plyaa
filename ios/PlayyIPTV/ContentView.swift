@@ -274,7 +274,7 @@ class PlayerInfoManager: ObservableObject {
     
     func stop() {
         hideTimer?.invalidate()
-        playerView?.pause()
+        playerView?.resetPlayer()
         DispatchQueue.main.async {
             self.resolutionString = "Bağlanıyor..."
             self.isPlaying = false
@@ -792,20 +792,23 @@ struct ContentView: View {
                 
                 VStack(spacing: 0) {
                     if let channel = selectedChannel {
-                        if !isLandscape {
-                            portraitPlayerHeader
-                        }
+                        portraitPlayerHeader
+                            .frame(height: isLandscape ? 0 : nil)
+                            .opacity(isLandscape ? 0 : 1)
+                            .clipped()
                         
                         ZStack {
                             NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo, isLive: channel.contentType == "live", selectedEngine: selectedPlayerEngine)
                                 .background(Color.black)
                                 .ignoresSafeArea(edges: isLandscape ? .all : [])
                             
-                            if isLandscape {
-                                landscapePlayerView
-                            } else {
-                                portraitPlayerOverlays
-                            }
+                            landscapePlayerView
+                                .opacity(isLandscape ? 1 : 0)
+                                .allowsHitTesting(isLandscape)
+                            
+                            portraitPlayerOverlays
+                                .opacity(isLandscape ? 0 : 1)
+                                .allowsHitTesting(!isLandscape)
                         }
                         .frame(width: isLandscape ? geo.size.width : nil, height: isLandscape ? geo.size.height : geo.size.height * 0.3)
                         .background(Color.black)
@@ -816,7 +819,7 @@ struct ContentView: View {
                             }
                         }
                         
-                        if !isLandscape {
+                        Group {
                             if channel.contentType != "live" {
                                 ScrollView {
                                     VStack(alignment: .leading, spacing: 20) {
@@ -840,12 +843,13 @@ struct ContentView: View {
                                         .padding(.horizontal, 20)
                                     }
                                 }
-                                .frame(height: geo.size.height * 0.65)
                             } else {
                                 mainTabContent
-                                    .frame(height: geo.size.height * 0.65)
                             }
                         }
+                        .frame(height: isLandscape ? 0 : geo.size.height * 0.65)
+                        .opacity(isLandscape ? 0 : 1)
+                        .clipped()
                     } else {
                         mainTabContent
                             .frame(height: geo.size.height)
@@ -1613,7 +1617,7 @@ struct ContentView: View {
                 HStack(spacing: 20) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, channel in
                         Button(action: {
-                            selectedChannel = channel
+                            playChannel(channel)
                         }) {
                             ZStack(alignment: .bottomLeading) {
                                 Group {
@@ -1681,7 +1685,7 @@ struct ContentView: View {
                 HStack(spacing: 12) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, channel in
                         Button(action: {
-                            selectedChannel = channel
+                            playChannel(channel)
                         }) {
                             VStack(alignment: .leading, spacing: 6) {
                                 Group {
@@ -1864,7 +1868,7 @@ struct ContentView: View {
                                 
                                 HStack(spacing: 16) {
                                     Button(action: {
-                                        selectedChannel = hero
+                                        playChannel(hero)
                                     }) {
                                         HStack {
                                             Image(systemName: "play.fill")
@@ -2738,7 +2742,7 @@ struct ContentView: View {
                                     LazyVStack(spacing: 8) {
                                         ForEach(landscapeFilteredChannels, id: \.self) { ch in
                                             Button(action: {
-                                                selectedChannel = ch
+                                                playChannel(ch)
                                                 resetTimer()
                                             }) {
                                                 HStack(spacing: 12) {
@@ -3535,6 +3539,7 @@ struct ContentView: View {
     }
     
     func playChannel(_ channel: Channel) {
+        globalPlayerInfo.stop()
         if channel.contentType == "live" {
             currentTab = .live
             activeLiveCategory = channel.safeGroup
