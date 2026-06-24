@@ -498,6 +498,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         var parent: NativeVideoPlayerView
         var currentUrl: String = ""
         var currentEngine: String = ""
+        var lastIsPlaying: Bool? = nil
         
         init(_ parent: NativeVideoPlayerView) {
             self.parent = parent
@@ -577,7 +578,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
     func updateUIView(_ uiView: VideoPlayerView, context: Context) {
         let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
-            uiView.pause()
+            uiView.resetPlayer()
             return
         }
         
@@ -594,6 +595,11 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         if context.coordinator.currentUrl != normalized || context.coordinator.currentEngine != selectedEngine {
             context.coordinator.currentUrl = normalized
             context.coordinator.currentEngine = selectedEngine
+            
+            // Son oynatıcıyı tamamen sıfırlayıp temizliyoruz (Double player & 1fps kasmayı çözer)
+            uiView.resetPlayer()
+            context.coordinator.lastIsPlaying = nil
+            
             if let url = URL(string: normalized) {
                 if selectedEngine == "FFmpeg" {
                     KSOptions.firstPlayerType = KSMEPlayer.self
@@ -612,15 +618,19 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             }
         }
         
-        if infoManager.isPlaying {
-            uiView.play()
-        } else {
-            uiView.pause()
+        // play/pause işlemlerini her render'da gereksiz yere tetiklememek için sadece durum değiştiğinde çağırıyoruz
+        if context.coordinator.lastIsPlaying != infoManager.isPlaying {
+            context.coordinator.lastIsPlaying = infoManager.isPlaying
+            if infoManager.isPlaying {
+                uiView.play()
+            } else {
+                uiView.pause()
+            }
         }
     }
     
     static func dismantleUIView(_ uiView: VideoPlayerView, coordinator: Coordinator) {
-        uiView.pause()
+        uiView.resetPlayer()
     }
 }
 
