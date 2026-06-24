@@ -224,7 +224,7 @@ class PlayerInfoManager: ObservableObject {
     
     func togglePlayPause() {
         if let pv = playerView {
-            if pv.isPlaying {
+            if self.isPlaying {
                 pv.pause()
                 self.isPlaying = false
             } else {
@@ -237,13 +237,13 @@ class PlayerInfoManager: ObservableObject {
     }
     
     func seek(to seconds: Double) {
-        playerView?.seek(time: seconds)
+        playerView?.seek(time: seconds, completion: { _ in })
         self.currentTime = seconds
     }
     
     func scrubValueUpdated(to seconds: Double) {
         scrubbingTime = seconds
-        playerView?.seek(time: seconds)
+        playerView?.seek(time: seconds, completion: { _ in })
     }
     
     func commitSeek() {
@@ -252,7 +252,7 @@ class PlayerInfoManager: ObservableObject {
             scrubbingTime = nil
             return
         }
-        playerView?.seek(time: seconds)
+        playerView?.seek(time: seconds, completion: { _ in })
         self.currentTime = seconds
         self.isScrubbing = false
         self.scrubbingTime = nil
@@ -275,7 +275,6 @@ class PlayerInfoManager: ObservableObject {
     func stop() {
         hideTimer?.invalidate()
         playerView?.pause()
-        playerView?.reset()
         DispatchQueue.main.async {
             self.resolutionString = "Bağlanıyor..."
             self.isPlaying = false
@@ -502,11 +501,13 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             self.parent = parent
         }
         
-        func playerView(playerView: PlayerView, playerStateDidChange state: KSPlayerState) {
+        func playerController(state: KSPlayerState) {
             DispatchQueue.main.async {
                 switch state {
-                case .prepare:
+                case .idle:
                     self.parent.infoManager.resolutionString = "Yükleniyor..."
+                case .preparing:
+                    self.parent.infoManager.resolutionString = "Bağlanıyor..."
                 case .readyToPlay:
                     self.parent.infoManager.resolutionString = self.parent.isLive ? "1080p (Canlı)" : "1080p"
                 case .buffering:
@@ -527,26 +528,40 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             }
         }
         
-        func playerView(playerView: PlayerView, loadedTimeDidChange loadedTime: TimeInterval, totalDuration: TimeInterval) {
-            // Optional buffering feedback
-        }
-        
-        func playerView(playerView: PlayerView, currentTimeDidChange currentTime: TimeInterval, totalDuration: TimeInterval) {
+        func playerController(currentTime: TimeInterval, totalTime: TimeInterval) {
             DispatchQueue.main.async {
                 if !self.parent.infoManager.isScrubbing {
                     self.parent.infoManager.currentTime = currentTime
                 }
-                if totalDuration.isFinite && totalDuration > 0 {
-                    self.parent.infoManager.duration = totalDuration
+                if totalTime.isFinite && totalTime > 0 {
+                    self.parent.infoManager.duration = totalTime
                 }
             }
         }
         
-        func playerView(playerView: PlayerView, playerPlayFailed error: Error) {
-            DispatchQueue.main.async {
-                self.parent.infoManager.resolutionString = "Yayın Açılamadı"
-                self.parent.infoManager.isPlaying = false
+        func playerController(finish error: Error?) {
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.parent.infoManager.resolutionString = "Yayın Açılamadı"
+                    self.parent.infoManager.isPlaying = false
+                }
             }
+        }
+        
+        func playerController(maskShow: Bool) {
+            // Required by PlayerControllerDelegate
+        }
+        
+        func playerController(action: PlayerButtonType) {
+            // Required by PlayerControllerDelegate
+        }
+        
+        func playerController(bufferedCount: Int, consumeTime: TimeInterval) {
+            // Required by PlayerControllerDelegate
+        }
+        
+        func playerController(seek: TimeInterval) {
+            // Required by PlayerControllerDelegate
         }
     }
     
@@ -558,7 +573,6 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         let playerView = VideoPlayerView()
         playerView.delegate = context.coordinator
         playerView.toolBar.isHidden = true
-        playerView.changeVolume(value: 1.0)
         infoManager.playerView = playerView
         return playerView
     }
@@ -566,7 +580,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
     func updateUIView(_ uiView: VideoPlayerView, context: Context) {
         let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
-            uiView.reset()
+            uiView.pause()
             return
         }
         
@@ -589,27 +603,21 @@ struct NativeVideoPlayerView: UIViewRepresentable {
                 
                 let options = KSOptions()
                 options.hardwareDecode = true
-                options.prepareMaxAnalyzeDuration = 2000
-                options.isLooping = false
                 
-                let resource = KSPlayerResource(url: url, name: "", options: options)
+                let resource = KSPlayerResource(url: url, options: options, name: "")
                 uiView.set(resource: resource)
             }
         }
         
         if infoManager.isPlaying {
-            if !uiView.isPlaying {
-                uiView.play()
-            }
+            uiView.play()
         } else {
-            if uiView.isPlaying {
-                uiView.pause()
-            }
+            uiView.pause()
         }
     }
     
     static func dismantleUIView(_ uiView: VideoPlayerView, coordinator: Coordinator) {
-        uiView.reset()
+        uiView.pause()
     }
 }
 
