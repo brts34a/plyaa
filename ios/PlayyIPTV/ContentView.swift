@@ -5,6 +5,7 @@ import AVFoundation
 import MediaPlayer
 import zlib
 import Network
+import KSPlayer
 
 // MARK: - Safe Decoder Int/String Helper for Xtream Codes Compatibility
 enum SafeStringOrInt: Codable, Hashable {
@@ -211,129 +212,38 @@ class PlayerInfoManager: ObservableObject {
     @Published var duration: Double = 1.0
     @Published var isScrubbing: Bool = false
     @Published var scrubbingTime: Double? = nil
-    @Published var avPlayer: AVPlayer? = nil
     
-    var timer: Timer?
+    weak var playerView: VideoPlayerView? = nil
     var hideTimer: Timer?
     
-    private var timeObserver: Any?
-    private var statusObserver: NSKeyValueObservation?
-    private var likelyToKeepUpObserver: NSKeyValueObservation?
-    private var emptyBufferObserver: NSKeyValueObservation?
-    private var isLive: Bool = false
-    
     func playURL(_ urlString: String, isLive: Bool) {
-        cleanUpPlayer()
-        self.isLive = isLive
-        let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return }
-        
-        let actualURL = getModdedURL(from: normalized, isLive: isLive)
-        let asset = AVURLAsset(url: actualURL)
-        let item = AVPlayerItem(asset: asset)
-        
-        if isLive {
-            item.preferredPeakBitRate = 0
-            item.preferredForwardBufferDuration = 5
-        }
-        
-        let newPlayer = AVPlayer(playerItem: item)
-        newPlayer.automaticallyWaitsToMinimizeStalling = true
-        self.avPlayer = newPlayer
         self.isPlaying = true
         self.resolutionString = "Bağlanıyor..."
-        
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
-        try? AVAudioSession.sharedInstance().setActive(true)
-        
-        timeObserver = newPlayer.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
-            guard let self = self else { return }
-            if !self.isScrubbing {
-                self.currentTime = time.seconds
-            }
-            if let duration = newPlayer.currentItem?.duration, duration.isNumeric {
-                self.duration = duration.seconds
-            }
-        }
-        
-        statusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self] item, change in
-            guard let self = self else { return }
-            DispatchQueue.main.async {
-                switch item.status {
-                case .readyToPlay:
-                    self.resolutionString = isLive ? "1080p (Canlı)" : "1080p"
-                    self.isPlaying = true
-                    if let duration = item.duration.isNumeric ? item.duration.seconds : nil, duration > 0 {
-                        self.duration = duration
-                    }
-                case .failed:
-                    self.resolutionString = "Hata"
-                    self.isPlaying = false
-                case .unknown:
-                    self.resolutionString = "Yükleniyor..."
-                @unknown default:
-                    break
-                }
-            }
-        }
-        
-        likelyToKeepUpObserver = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, _ in
-            guard let self = self else { return }
-            DispatchQueue.main.async {
-                if item.isPlaybackLikelyToKeepUp {
-                    self.resolutionString = isLive ? "1080p (Canlı)" : "1080p"
-                }
-            }
-        }
-        
-        emptyBufferObserver = item.observe(\.isPlaybackBufferEmpty, options: [.new]) { [weak self] item, _ in
-            guard let self = self else { return }
-            DispatchQueue.main.async {
-                if item.isPlaybackBufferEmpty {
-                    self.resolutionString = "Ara Bellek..."
-                }
-            }
-        }
-        
-        NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidReachEnd), name: .AVPlayerItemDidPlayToEndTime, object: item)
-        
-        newPlayer.play()
-        timer?.invalidate()
         userTapped()
     }
     
-    @objc private func playerItemDidReachEnd(notification: Notification) {
-        DispatchQueue.main.async { [weak self] in
-            self?.isPlaying = false
-        }
-    }
-    
     func togglePlayPause() {
-        if let player = avPlayer {
-            if isPlaying {
-                player.pause()
-                isPlaying = false
+        if let pv = playerView {
+            if pv.isPlaying {
+                pv.pause()
+                self.isPlaying = false
             } else {
-                player.play()
-                isPlaying = true
+                pv.play()
+                self.isPlaying = true
             }
+        } else {
+            self.isPlaying.toggle()
         }
     }
     
     func seek(to seconds: Double) {
-        if let player = avPlayer {
-            let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
-            player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero)
-            self.currentTime = seconds
-        }
+        playerView?.seek(time: seconds)
+        self.currentTime = seconds
     }
     
     func scrubValueUpdated(to seconds: Double) {
         scrubbingTime = seconds
-        if let player = avPlayer {
-            let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
-            player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero)
-        }
+        playerView?.seek(time: seconds)
     }
     
     func commitSeek() {
@@ -342,16 +252,10 @@ class PlayerInfoManager: ObservableObject {
             scrubbingTime = nil
             return
         }
-        if let player = avPlayer {
-            let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
-            player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
-                DispatchQueue.main.async {
-                    self?.currentTime = seconds
-                    self?.isScrubbing = false
-                    self?.scrubbingTime = nil
-                }
-            }
-        }
+        playerView?.seek(time: seconds)
+        self.currentTime = seconds
+        self.isScrubbing = false
+        self.scrubbingTime = nil
     }
     
     func userTapped() {
@@ -368,28 +272,10 @@ class PlayerInfoManager: ObservableObject {
         }
     }
     
-    func cleanUpPlayer() {
-        if let timeObserver = timeObserver {
-            avPlayer?.removeTimeObserver(timeObserver)
-            self.timeObserver = nil
-        }
-        statusObserver?.invalidate()
-        statusObserver = nil
-        likelyToKeepUpObserver?.invalidate()
-        likelyToKeepUpObserver = nil
-        emptyBufferObserver?.invalidate()
-        emptyBufferObserver = nil
-        
-        NotificationCenter.default.removeObserver(self)
-        
-        avPlayer?.pause()
-        avPlayer = nil
-    }
-    
     func stop() {
-        timer?.invalidate()
         hideTimer?.invalidate()
-        cleanUpPlayer()
+        playerView?.pause()
+        playerView?.reset()
         DispatchQueue.main.async {
             self.resolutionString = "Bağlanıyor..."
             self.isPlaying = false
@@ -398,10 +284,12 @@ class PlayerInfoManager: ObservableObject {
         }
     }
     
+    func cleanUpPlayer() {
+        stop()
+    }
+    
     deinit {
-        timer?.invalidate()
         hideTimer?.invalidate()
-        cleanUpPlayer()
     }
 }
 
@@ -606,47 +494,124 @@ struct NativeVideoPlayerView: UIViewRepresentable {
     @ObservedObject var infoManager: PlayerInfoManager
     var isLive: Bool = false
     
-    class Coordinator: NSObject {
+    class Coordinator: NSObject, VideoPlayerViewDelegate {
+        var parent: NativeVideoPlayerView
         var currentUrl: String = ""
+        
+        init(_ parent: NativeVideoPlayerView) {
+            self.parent = parent
+        }
+        
+        func playerView(playerView: VideoPlayerView, playerStateDidChange state: KSPlayerState) {
+            DispatchQueue.main.async {
+                switch state {
+                case .idle:
+                    self.parent.infoManager.resolutionString = "Yükleniyor..."
+                case .preparing:
+                    self.parent.infoManager.resolutionString = "Bağlanıyor..."
+                case .readyToPlay:
+                    self.parent.infoManager.resolutionString = self.parent.isLive ? "1080p (Canlı)" : "1080p"
+                case .buffering:
+                    self.parent.infoManager.resolutionString = "Ara Bellek..."
+                case .playing:
+                    self.parent.infoManager.isPlaying = true
+                    self.parent.infoManager.resolutionString = self.parent.isLive ? "1080p (Canlı)" : "1080p"
+                case .paused:
+                    self.parent.infoManager.isPlaying = false
+                case .playedToTheEnd:
+                    self.parent.infoManager.isPlaying = false
+                case .error:
+                    self.parent.infoManager.resolutionString = "Yayın Açılamadı"
+                    self.parent.infoManager.isPlaying = false
+                @unknown default:
+                    break
+                }
+            }
+        }
+        
+        func playerView(playerView: VideoPlayerView, loadedTimeDidChange loadedTime: TimeInterval, totalDuration: TimeInterval) {
+            // Optional buffering feedback
+        }
+        
+        func playerView(playerView: VideoPlayerView, currentTimeDidChange currentTime: TimeInterval, totalDuration: TimeInterval) {
+            DispatchQueue.main.async {
+                if !self.parent.infoManager.isScrubbing {
+                    self.parent.infoManager.currentTime = currentTime
+                }
+                if totalDuration.isFinite && totalDuration > 0 {
+                    self.parent.infoManager.duration = totalDuration
+                }
+            }
+        }
+        
+        func playerView(playerView: VideoPlayerView, playerPlayFailed error: Error) {
+            DispatchQueue.main.async {
+                self.parent.infoManager.resolutionString = "Yayın Açılamadı"
+                self.parent.infoManager.isPlaying = false
+            }
+        }
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(self)
     }
     
-    func makeUIView(context: Context) -> AVPlayerContainerView {
-        let view = AVPlayerContainerView()
-        view.player = infoManager.avPlayer
-        return view
+    func makeUIView(context: Context) -> VideoPlayerView {
+        let playerView = VideoPlayerView()
+        playerView.delegate = context.coordinator
+        playerView.toolBar.isHidden = true
+        playerView.changeVolume(value: 1.0)
+        infoManager.playerView = playerView
+        return playerView
     }
     
-    func updateUIView(_ uiView: AVPlayerContainerView, context: Context) {
+    func updateUIView(_ uiView: VideoPlayerView, context: Context) {
         let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
-            uiView.player = nil
+            uiView.reset()
             return
         }
         
         if videoContentMode == .scaleAspectFill {
-            uiView.setVideoGravity(.resizeAspectFill)
+            uiView.contentMode = .scaleAspectFill
         } else if videoContentMode == .scaleToFill {
-            uiView.setVideoGravity(.resize)
+            uiView.contentMode = .scaleToFill
         } else {
-            uiView.setVideoGravity(.resizeAspect)
+            uiView.contentMode = .scaleAspectFit
         }
+        
+        infoManager.playerView = uiView
         
         if context.coordinator.currentUrl != normalized {
             context.coordinator.currentUrl = normalized
-            infoManager.playURL(normalized, isLive: isLive)
+            if let url = URL(string: normalized) {
+                let options = KSOptions()
+                options.firstPlayerType = .KS
+                options.secondPlayerType = .KS
+                options.hardwareDecode = true
+                options.isAutoPlay = true
+                options.livePlay = isLive
+                options.prepareMaxAnalyzeDuration = 2000
+                options.isLooping = false
+                
+                let resource = KSPlayerResource(url: url, name: "", options: options)
+                uiView.set(resource: resource)
+            }
         }
         
-        if uiView.player !== infoManager.avPlayer {
-            uiView.player = infoManager.avPlayer
+        if infoManager.isPlaying {
+            if !uiView.isPlaying {
+                uiView.play()
+            }
+        } else {
+            if uiView.isPlaying {
+                uiView.pause()
+            }
         }
     }
     
-    static func dismantleUIView(_ uiView: AVPlayerContainerView, coordinator: Coordinator) {
-        uiView.player = nil
+    static func dismantleUIView(_ uiView: VideoPlayerView, coordinator: Coordinator) {
+        uiView.reset()
     }
 }
 
