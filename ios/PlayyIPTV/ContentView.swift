@@ -494,7 +494,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
     @ObservedObject var infoManager: PlayerInfoManager
     var isLive: Bool = false
     
-    class Coordinator: NSObject, VideoPlayerViewDelegate {
+    class Coordinator: NSObject, PlayerControllerDelegate {
         var parent: NativeVideoPlayerView
         var currentUrl: String = ""
         
@@ -502,13 +502,11 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             self.parent = parent
         }
         
-        func playerView(playerView: VideoPlayerView, playerStateDidChange state: KSPlayerState) {
+        func playerView(playerView: PlayerView, playerStateDidChange state: KSPlayerState) {
             DispatchQueue.main.async {
                 switch state {
-                case .idle:
+                case .prepare:
                     self.parent.infoManager.resolutionString = "Yükleniyor..."
-                case .preparing:
-                    self.parent.infoManager.resolutionString = "Bağlanıyor..."
                 case .readyToPlay:
                     self.parent.infoManager.resolutionString = self.parent.isLive ? "1080p (Canlı)" : "1080p"
                 case .buffering:
@@ -529,11 +527,11 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             }
         }
         
-        func playerView(playerView: VideoPlayerView, loadedTimeDidChange loadedTime: TimeInterval, totalDuration: TimeInterval) {
+        func playerView(playerView: PlayerView, loadedTimeDidChange loadedTime: TimeInterval, totalDuration: TimeInterval) {
             // Optional buffering feedback
         }
         
-        func playerView(playerView: VideoPlayerView, currentTimeDidChange currentTime: TimeInterval, totalDuration: TimeInterval) {
+        func playerView(playerView: PlayerView, currentTimeDidChange currentTime: TimeInterval, totalDuration: TimeInterval) {
             DispatchQueue.main.async {
                 if !self.parent.infoManager.isScrubbing {
                     self.parent.infoManager.currentTime = currentTime
@@ -544,7 +542,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
             }
         }
         
-        func playerView(playerView: VideoPlayerView, playerPlayFailed error: Error) {
+        func playerView(playerView: PlayerView, playerPlayFailed error: Error) {
             DispatchQueue.main.async {
                 self.parent.infoManager.resolutionString = "Yayın Açılamadı"
                 self.parent.infoManager.isPlaying = false
@@ -585,12 +583,12 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         if context.coordinator.currentUrl != normalized {
             context.coordinator.currentUrl = normalized
             if let url = URL(string: normalized) {
+                KSOptions.firstPlayerType = KSAVPlayer.self
+                KSOptions.secondPlayerType = KSMEPlayer.self
+                KSOptions.isAutoPlay = true
+                
                 let options = KSOptions()
-                options.firstPlayerType = .KS
-                options.secondPlayerType = .KS
                 options.hardwareDecode = true
-                options.isAutoPlay = true
-                options.livePlay = isLive
                 options.prepareMaxAnalyzeDuration = 2000
                 options.isLooping = false
                 
