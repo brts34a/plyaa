@@ -492,10 +492,12 @@ struct NativeVideoPlayerView: UIViewRepresentable {
     let videoContentMode: UIView.ContentMode
     @ObservedObject var infoManager: PlayerInfoManager
     var isLive: Bool = false
+    let selectedEngine: String
     
     class Coordinator: NSObject, PlayerControllerDelegate {
         var parent: NativeVideoPlayerView
         var currentUrl: String = ""
+        var currentEngine: String = ""
         
         init(_ parent: NativeVideoPlayerView) {
             self.parent = parent
@@ -504,7 +506,7 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         func playerController(state: KSPlayerState) {
             DispatchQueue.main.async {
                 switch state {
-                case .prepare:
+                case .preparing:
                     self.parent.infoManager.resolutionString = "Bağlanıyor..."
                 case .readyToPlay:
                     self.parent.infoManager.resolutionString = self.parent.isLive ? "1080p (Canlı)" : "1080p"
@@ -589,16 +591,21 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         
         infoManager.playerView = uiView
         
-        if context.coordinator.currentUrl != normalized {
+        if context.coordinator.currentUrl != normalized || context.coordinator.currentEngine != selectedEngine {
             context.coordinator.currentUrl = normalized
+            context.coordinator.currentEngine = selectedEngine
             if let url = URL(string: normalized) {
-                KSOptions.firstPlayerType = KSMEPlayer.self
-                KSOptions.secondPlayerType = KSAVPlayer.self
+                if selectedEngine == "FFmpeg" {
+                    KSOptions.firstPlayerType = KSMEPlayer.self
+                    KSOptions.secondPlayerType = KSAVPlayer.self
+                } else {
+                    KSOptions.firstPlayerType = KSAVPlayer.self
+                    KSOptions.secondPlayerType = KSMEPlayer.self
+                }
                 KSOptions.isAutoPlay = true
                 
                 let options = KSOptions()
                 options.hardwareDecode = true
-                options.prepareMaxAnalyzeDuration = 2000
                 
                 let resource = KSPlayerResource(url: url, options: options, name: "")
                 uiView.set(resource: resource)
@@ -681,6 +688,7 @@ struct ContentView: View {
     @State private var showAccountsSheet: Bool = false
     @AppStorage("dion_active_account_id") private var activeAccountIdString: String = ""
     @State private var playerContentMode: UIView.ContentMode = .scaleAspectFit
+    @AppStorage("selected_player_engine") private var selectedPlayerEngine: String = "AVPlayer"
     
     @State private var channels: [Channel] = []
     @State private var favourites: Set<String> = []
@@ -779,7 +787,7 @@ struct ContentView: View {
                         }
                         
                         ZStack {
-                            NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo, isLive: channel.contentType == "live")
+                            NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo, isLive: channel.contentType == "live", selectedEngine: selectedPlayerEngine)
                                 .background(Color.black)
                                 .ignoresSafeArea(edges: isLandscape ? .all : [])
                             
@@ -2868,6 +2876,41 @@ struct ContentView: View {
                                                 }
                                                 .padding(12)
                                                 .background(Color.white.opacity(playerContentMode == mode ? 0.12 : 0.04))
+                                                .cornerRadius(8)
+                                            }
+                                        }
+                                    }
+                                    .padding(.horizontal, 16)
+                                    
+                                    // Oynatıcı Motoru
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Oynatıcı Motoru")
+                                            .font(.system(size: 14, weight: .bold))
+                                            .foregroundColor(.white.opacity(0.6))
+                                        
+                                        ForEach(["AVPlayer", "FFmpeg"], id: \.self) { engine in
+                                            Button(action: {
+                                                selectedPlayerEngine = engine
+                                                resetTimer()
+                                            }) {
+                                                HStack {
+                                                    VStack(alignment: .leading, spacing: 2) {
+                                                        Text(engine == "AVPlayer" ? "Apple AVPlayer (Native)" : "Gelişmiş Engine (FFmpeg)")
+                                                            .font(.system(size: 13, weight: .semibold))
+                                                            .foregroundColor(.white)
+                                                        Text(engine == "AVPlayer" ? "Ultra düşük CPU/pil tüketimi, sıfır ısınma, donanım hızlandırma." : "Daha fazla format ve TS yayını destekleyen gelişmiş yazılım motoru.")
+                                                            .font(.system(size: 10))
+                                                            .foregroundColor(.white.opacity(0.5))
+                                                            .multilineTextAlignment(.leading)
+                                                    }
+                                                    Spacer()
+                                                    if selectedPlayerEngine == engine {
+                                                        Image(systemName: "checkmark.circle.fill")
+                                                            .foregroundColor(Color(hex: "007FFF"))
+                                                    }
+                                                }
+                                                .padding(12)
+                                                .background(Color.white.opacity(selectedPlayerEngine == engine ? 0.12 : 0.04))
                                                 .cornerRadius(8)
                                             }
                                         }
