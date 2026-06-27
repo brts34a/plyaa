@@ -5,7 +5,7 @@ import AVFoundation
 import MediaPlayer
 import zlib
 import Network
-import KSPlayer
+import MobileVLCKit
 
 // MARK: - Safe Decoder Int/String Helper for Xtream Codes Compatibility
 enum SafeStringOrInt: Codable, Hashable {
@@ -213,7 +213,7 @@ class PlayerInfoManager: ObservableObject {
     @Published var isScrubbing: Bool = false
     @Published var scrubbingTime: Double? = nil
     
-    weak var playerView: VideoPlayerView? = nil
+    weak var mediaPlayer: VLCMediaPlayer? = nil
     var hideTimer: Timer?
     
     func playURL(_ urlString: String, isLive: Bool) {
@@ -237,13 +237,19 @@ class PlayerInfoManager: ObservableObject {
     }
     
     func seek(to seconds: Double) {
-        playerView?.seek(time: seconds, completion: { _ in })
+        
+        if let mp = mediaPlayer, let time = VLCTime(int: Int32(seconds * 1000)) {
+            mp.time = time
+        }
         self.currentTime = seconds
     }
     
     func scrubValueUpdated(to seconds: Double) {
         scrubbingTime = seconds
-        playerView?.seek(time: seconds, completion: { _ in })
+        
+        if let mp = mediaPlayer, let time = VLCTime(int: Int32(seconds * 1000)) {
+            mp.time = time
+        }
     }
     
     func commitSeek() {
@@ -252,7 +258,10 @@ class PlayerInfoManager: ObservableObject {
             scrubbingTime = nil
             return
         }
-        playerView?.seek(time: seconds, completion: { _ in })
+        
+        if let mp = mediaPlayer, let time = VLCTime(int: Int32(seconds * 1000)) {
+            mp.time = time
+        }
         self.currentTime = seconds
         self.isScrubbing = false
         self.scrubbingTime = nil
@@ -274,7 +283,7 @@ class PlayerInfoManager: ObservableObject {
     
     func stop() {
         hideTimer?.invalidate()
-        playerView?.resetPlayer()
+        mediaPlayer?.stop()
         DispatchQueue.main.async {
             self.resolutionString = "Bağlanıyor..."
             self.isPlaying = false
@@ -330,236 +339,56 @@ class AVPlayerContainerView: UIView {
     }
 }
 
-// MARK: - High-Performance Built-in Local HLS Proxy Server for .ts Streams
-class LocalHTTPServer {
-    static let shared = LocalHTTPServer()
-    private var listener: NWListener?
-    private(set) var port: UInt16 = 0
-    
-    func start() {
-        guard listener == nil else { return }
-        
-        do {
-            let parameters = NWParameters.tcp
-            let listener = try NWListener(using: parameters, on: .any)
-            self.listener = listener
-            
-            listener.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    if let portValue = listener.port {
-                        self.port = portValue.rawValue
-                        print("Local HTTPServer started on port: \(self.port)")
-                    }
-                case .failed(let error):
-                    print("Local HTTPServer failed: \(error)")
-                default:
-                    break
-                }
-            }
-            
-            listener.newConnectionHandler = { [weak self] connection in
-                self?.handleConnection(connection)
-            }
-            
-            listener.start(queue: DispatchQueue.global(qos: .userInitiated))
-        } catch {
-            print("Failed to start NWListener: \(error)")
-        }
-    }
-    
-    func getProxyURL(for originalURL: String, isLive: Bool) -> URL {
-        if port == 0 {
-            start()
-            var count = 0
-            while port == 0 && count < 30 {
-                Thread.sleep(forTimeInterval: 0.01)
-                count += 1
-            }
-        }
-        
-        let utf8Data = originalURL.data(using: .utf8)!
-        let base64String = utf8Data.base64EncodedString()
-        let liveStr = isLive ? "true" : "false"
-        let urlSafeBase64 = base64String.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? base64String
-        
-        return URL(string: "http://127.0.0.1:\(port)/playlist?data=\(urlSafeBase64)&live=\(liveStr)") ?? URL(string: originalURL)!
-    }
-    
-    private func handleConnection(_ connection: NWConnection) {
-        connection.start(queue: DispatchQueue.global(qos: .default))
-        receiveRequest(connection)
-    }
-    
-    private func receiveRequest(_ connection: NWConnection) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { content, context, isComplete, error in
-            guard error == nil, let content = content else {
-                connection.cancel()
-                return
-            }
-            
-            let requestStr = String(decoding: content, as: UTF8.self)
-            
-            if let firstLine = requestStr.components(separatedBy: "\r\n").first, firstLine.contains("GET /playlist") {
-                var parsedURLString: String? = nil
-                var isLiveStream = false
-                
-                if let dataRange = firstLine.range(of: "data=") {
-                    let suffix = firstLine[dataRange.upperBound...]
-                    let base64Encoded: String
-                    if let endRange = suffix.range(of: "&") {
-                        base64Encoded = String(suffix[..<endRange.lowerBound])
-                    } else if let endRange = suffix.range(of: " ") {
-                        base64Encoded = String(suffix[..<endRange.lowerBound])
-                    } else {
-                        base64Encoded = String(suffix)
-                    }
-                    
-                    if let percentDecoded = base64Encoded.removingPercentEncoding,
-                       let decodedData = Data(base64Encoded: percentDecoded),
-                       let decodedURLString = String(data: decodedData, encoding: .utf8) {
-                        parsedURLString = decodedURLString
-                    }
-                }
-                
-                if firstLine.contains("live=true") {
-                    isLiveStream = true
-                }
-                
-                if let streamURL = parsedURLString {
-                    let targetDuration = isLiveStream ? 86400 : 3600
-                    let playlist = """
-                    #EXTM3U
-                    #EXT-X-VERSION:3
-                    #EXT-X-TARGETDURATION:\(targetDuration)
-                    #EXT-X-MEDIA-SEQUENCE:0
-                    #EXTINF:\(targetDuration).0,
-                    \(streamURL)
-                    \(isLiveStream ? "" : "#EXT-X-ENDLIST")
-                    """
-                    
-                    let playlistData = playlist.data(using: .utf8)!
-                    let response = """
-                    HTTP/1.1 200 OK\r
-                    Content-Type: application/x-mpegURL\r
-                    Content-Length: \(playlistData.count)\r
-                    Connection: close\r
-                    Access-Control-Allow-Origin: *\r
-                    \r
-                    """
-                    
-                    var responseData = response.data(using: .utf8)!
-                    responseData.append(playlistData)
-                    
-                    connection.send(content: responseData, completion: .contentProcessed({ _ in
-                        connection.cancel()
-                    }))
-                    return
-                }
-            }
-            
-            let badResponse = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n"
-            connection.send(content: badResponse.data(using: .utf8)!, completion: .contentProcessed({ _ in
-                connection.cancel()
-            }))
-        }
-    }
-}
 
-func getModdedURL(from urlString: String, isLive: Bool) -> URL {
-    let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let originalURL = URL(string: normalized) else {
-        return URL(string: "about:blank")!
-    }
-    
-    let lowercaseURL = normalized.lowercased()
-    
-    // Check if the URL points to a .ts stream or has any TS identifiers
-    if lowercaseURL.hasSuffix(".ts") || 
-       lowercaseURL.contains(".ts?") || 
-       lowercaseURL.contains("/mpegts") || 
-       lowercaseURL.contains("type=mpts") || 
-       lowercaseURL.contains("/ts/") || 
-       lowercaseURL.contains("output=ts") {
-        return LocalHTTPServer.shared.getProxyURL(for: normalized, isLive: isLive)
-    }
-    
-    return originalURL
-}
 
-struct NativeVideoPlayerView: UIViewRepresentable {
+struct VLCVideoPlayerView: UIViewRepresentable {
     let urlString: String
     let videoContentMode: UIView.ContentMode
     @ObservedObject var infoManager: PlayerInfoManager
     var isLive: Bool = false
-    let selectedEngine: String
     
-    class Coordinator: NSObject, PlayerControllerDelegate {
-        var parent: NativeVideoPlayerView
-        var currentUrl: String = ""
-        var currentEngine: String = ""
-        var lastIsPlaying: Bool? = nil
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .black
         
-        init(_ parent: NativeVideoPlayerView) {
-            self.parent = parent
+        let mediaPlayer = VLCMediaPlayer()
+        mediaPlayer.drawable = view
+        mediaPlayer.delegate = context.coordinator
+        
+        context.coordinator.mediaPlayer = mediaPlayer
+        infoManager.mediaPlayer = mediaPlayer
+        
+        return view
+    }
+    
+    func updateUIView(_ uiView: UIView, context: Context) {
+        let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            context.coordinator.mediaPlayer?.stop()
+            return
         }
         
-        func playerController(state: KSPlayerState) {
-            DispatchQueue.main.async {
-                switch state {
-                case .preparing:
-                    self.parent.infoManager.resolutionString = "Bağlanıyor..."
-                case .readyToPlay:
-                    self.parent.infoManager.resolutionString = self.parent.isLive ? "1080p (Canlı)" : "1080p"
-                case .buffering:
-                    self.parent.infoManager.resolutionString = "Ara Bellek..."
-                case .bufferFinished:
-                    self.parent.infoManager.resolutionString = self.parent.isLive ? "1080p (Canlı)" : "1080p"
-                case .playedToTheEnd:
-                    self.parent.infoManager.isPlaying = false
-                case .error:
-                    self.parent.infoManager.resolutionString = "Yayın Açılamadı"
-                    self.parent.infoManager.isPlaying = false
-                @unknown default:
-                    break
-                }
-            }
-        }
-        
-        func playerController(currentTime: TimeInterval, totalTime: TimeInterval) {
-            DispatchQueue.main.async {
-                if !self.parent.infoManager.isScrubbing {
-                    self.parent.infoManager.currentTime = currentTime
-                }
-                if totalTime.isFinite && totalTime > 0 {
-                    self.parent.infoManager.duration = totalTime
-                }
-            }
-        }
-        
-        func playerController(finish error: Error?) {
-            if error != nil {
+        if context.coordinator.currentUrl != normalized {
+            context.coordinator.currentUrl = normalized
+            
+            if let url = URL(string: normalized) {
+                let media = VLCMedia(url: url)
+                context.coordinator.mediaPlayer?.media = media
+                context.coordinator.mediaPlayer?.play()
+                
                 DispatchQueue.main.async {
-                    self.parent.infoManager.resolutionString = "Yayın Açılamadı"
-                    self.parent.infoManager.isPlaying = false
+                    self.infoManager.isPlaying = true
                 }
             }
         }
         
-        func playerController(maskShow: Bool) {
-            // Required by PlayerControllerDelegate
-        }
-        
-        func playerController(action: PlayerButtonType) {
-            // Required by PlayerControllerDelegate
-        }
-        
-        func playerController(bufferedCount: Int, consumeTime: TimeInterval) {
-            // Required by PlayerControllerDelegate
-        }
-        
-        func playerController(seek: TimeInterval) {
-            // Required by PlayerControllerDelegate
+        if context.coordinator.lastIsPlaying != infoManager.isPlaying {
+            context.coordinator.lastIsPlaying = infoManager.isPlaying
+            if infoManager.isPlaying {
+                context.coordinator.mediaPlayer?.play()
+            } else {
+                context.coordinator.mediaPlayer?.pause()
+            }
         }
     }
     
@@ -567,74 +396,62 @@ struct NativeVideoPlayerView: UIViewRepresentable {
         Coordinator(self)
     }
     
-    func makeUIView(context: Context) -> VideoPlayerView {
-        let playerView = VideoPlayerView()
-        playerView.delegate = context.coordinator
-        playerView.toolBar.isHidden = true
-        infoManager.playerView = playerView
-        return playerView
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        coordinator.mediaPlayer?.stop()
+        coordinator.mediaPlayer = nil
     }
     
-    func updateUIView(_ uiView: VideoPlayerView, context: Context) {
-        let normalized = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else {
-            uiView.resetPlayer()
-            return
+    class Coordinator: NSObject, VLCMediaPlayerDelegate {
+        var parent: VLCVideoPlayerView
+        var mediaPlayer: VLCMediaPlayer?
+        var currentUrl: String = ""
+        var lastIsPlaying: Bool? = nil
+        
+        init(_ parent: VLCVideoPlayerView) {
+            self.parent = parent
         }
         
-        if videoContentMode == .scaleAspectFill {
-            uiView.contentMode = .scaleAspectFill
-        } else if videoContentMode == .scaleToFill {
-            uiView.contentMode = .scaleToFill
-        } else {
-            uiView.contentMode = .scaleAspectFit
-        }
-        
-        infoManager.playerView = uiView
-        
-        if context.coordinator.currentUrl != normalized || context.coordinator.currentEngine != selectedEngine {
-            context.coordinator.currentUrl = normalized
-            context.coordinator.currentEngine = selectedEngine
+        func mediaPlayerStateChanged(_ aNotification: Notification) {
+            guard let player = mediaPlayer else { return }
             
-            // Son oynatıcıyı tamamen sıfırlayıp temizliyoruz (Double player & 1fps kasmayı çözer)
-            uiView.resetPlayer()
-            context.coordinator.lastIsPlaying = nil
-            
-            if let url = URL(string: normalized) {
-                if selectedEngine == "FFmpeg" {
-                    KSOptions.firstPlayerType = KSMEPlayer.self
-                    KSOptions.secondPlayerType = KSAVPlayer.self
-                } else {
-                    KSOptions.firstPlayerType = KSAVPlayer.self
-                    KSOptions.secondPlayerType = KSMEPlayer.self
+            DispatchQueue.main.async {
+                switch player.state {
+                case .buffering:
+                    self.parent.infoManager.resolutionString = "Ara Bellek..."
+                case .playing:
+                    self.parent.infoManager.resolutionString = self.parent.isLive ? "1080p (Canlı)" : "1080p"
+                    self.parent.infoManager.isPlaying = true
+                case .paused:
+                    self.parent.infoManager.isPlaying = false
+                case .stopped:
+                    self.parent.infoManager.isPlaying = false
+                case .error:
+                    self.parent.infoManager.resolutionString = "Yayın Açılamadı"
+                    self.parent.infoManager.isPlaying = false
+                default:
+                    break
                 }
-                KSOptions.isAutoPlay = true
-                
-                let options = KSOptions()
-                options.hardwareDecode = true
-                
-                let resource = KSPlayerResource(url: url, options: options, name: "")
-                uiView.set(resource: resource)
             }
         }
         
-        // play/pause işlemlerini her render'da gereksiz yere tetiklememek için sadece durum değiştiğinde çağırıyoruz
-        if context.coordinator.lastIsPlaying != infoManager.isPlaying {
-            context.coordinator.lastIsPlaying = infoManager.isPlaying
-            if infoManager.isPlaying {
-                uiView.play()
-            } else {
-                uiView.pause()
+        func mediaPlayerTimeChanged(_ aNotification: Notification) {
+            guard let player = mediaPlayer else { return }
+            
+            DispatchQueue.main.async {
+                if !self.parent.infoManager.isScrubbing {
+                    if let time = player.time, let totalTime = player.media?.length {
+                        self.parent.infoManager.currentTime = TimeInterval(time.intValue) / 1000.0
+                        let totalInterval = TimeInterval(totalTime.intValue) / 1000.0
+                        if totalInterval > 0 {
+                            self.parent.infoManager.duration = totalInterval
+                        }
+                    }
+                }
             }
         }
-    }
-    
-    static func dismantleUIView(_ uiView: VideoPlayerView, coordinator: Coordinator) {
-        uiView.resetPlayer()
     }
 }
 
-// MARK: - Modern Player Overlay: Clock, Quality
 struct PlayerOverlaySwiftUIView: View {
     @ObservedObject var info: PlayerInfoManager
     
@@ -698,7 +515,6 @@ struct ContentView: View {
     @State private var showAccountsSheet: Bool = false
     @AppStorage("dion_active_account_id") private var activeAccountIdString: String = ""
     @State private var playerContentMode: UIView.ContentMode = .scaleAspectFit
-    @AppStorage("selected_player_engine") private var selectedPlayerEngine: String = "AVPlayer"
     
     @State private var channels: [Channel] = []
     @State private var favourites: Set<String> = []
@@ -798,7 +614,7 @@ struct ContentView: View {
                             .clipped()
                         
                         ZStack {
-                            NativeVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo, isLive: channel.contentType == "live", selectedEngine: selectedPlayerEngine)
+                            VLCVideoPlayerView(urlString: channel.url, videoContentMode: playerContentMode, infoManager: globalPlayerInfo, isLive: channel.contentType == "live")
                                 .background(Color.black)
                                 .ignoresSafeArea(edges: isLandscape ? .all : [])
                             
@@ -2896,40 +2712,7 @@ struct ContentView: View {
                                     }
                                     .padding(.horizontal, 16)
                                     
-                                    // Oynatıcı Motoru
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text("Oynatıcı Motoru")
-                                            .font(.system(size: 14, weight: .bold))
-                                            .foregroundColor(.white.opacity(0.6))
-                                        
-                                        ForEach(["AVPlayer", "FFmpeg"], id: \.self) { engine in
-                                            Button(action: {
-                                                selectedPlayerEngine = engine
-                                                resetTimer()
-                                            }) {
-                                                HStack {
-                                                    VStack(alignment: .leading, spacing: 2) {
-                                                        Text(engine == "AVPlayer" ? "Apple AVPlayer (Native)" : "Gelişmiş Engine (FFmpeg)")
-                                                            .font(.system(size: 13, weight: .semibold))
-                                                            .foregroundColor(.white)
-                                                        Text(engine == "AVPlayer" ? "Ultra düşük CPU/pil tüketimi, sıfır ısınma, donanım hızlandırma." : "Daha fazla format ve TS yayını destekleyen gelişmiş yazılım motoru.")
-                                                            .font(.system(size: 10))
-                                                            .foregroundColor(.white.opacity(0.5))
-                                                            .multilineTextAlignment(.leading)
-                                                    }
-                                                    Spacer()
-                                                    if selectedPlayerEngine == engine {
-                                                        Image(systemName: "checkmark.circle.fill")
-                                                            .foregroundColor(Color(hex: "007FFF"))
-                                                    }
-                                                }
-                                                .padding(12)
-                                                .background(Color.white.opacity(selectedPlayerEngine == engine ? 0.12 : 0.04))
-                                                .cornerRadius(8)
-                                            }
-                                        }
-                                    }
-                                    .padding(.horizontal, 16)
+                                    
                                     
                                     // Connection Details info block
                                     VStack(alignment: .leading, spacing: 10) {
